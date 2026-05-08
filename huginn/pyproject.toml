@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "huginn"
+version = "0.1.0"
+description = "Skill-based LLM pipeline system for local infrastructure"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "openai>=1.0",
+    "pyyaml>=6.0",
+    "python-frontmatter>=1.0",
+    "docker>=7.0",
+    "rich>=13.0",
+]
+
+[project.scripts]
+huginn = "huginn.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]

@@ -1,0 +1,58 @@
+name: post-generator
+description: Generate LinkedIn posts in Ken's voice from source material
+version: "1.0"
+
+defaults:
+  backend: i3
+  timeout_minutes: 60
+
+stages:
+  - name: analyze
+    skill: skills/01-analyze.md
+    model: qwen2.5:7b
+    input: $pipeline_input
+    output: analysis.json
+    tools: [file_read]
+    constraints:
+      network: false
+      shell: false
+
+  - name: draft
+    skill: skills/02-draft.md
+    model: qwen2.5:7b
+    input: analysis.json
+    files: [files/voice-rules.md]
+    output: draft.md
+    tools: [file_read, file_write]
+    constraints:
+      network: false
+      shell: false
+
+  - name: slop-filter
+    skill: skills/03-slop-filter.md
+    model: qwen2.5:7b
+    input: draft.md
+    output: slop-report.json
+    tools: [file_read]
+    constraints:
+      network: false
+      shell: false
+
+  - name: revise
+    skill: skills/04-revise.md
+    model: qwen2.5:7b
+    input:
+      - draft.md
+      - slop-report.json
+    files: [files/voice-rules.md]
+    output: final-post.md
+    tools: [file_read, file_write]
+    verification:
+      - "Output is 150-300 words"
+      - "No banned phrases from style guide"
+    constraints:
+      network: false
+      shell: false
+
+on_complete:
+  output_file: final-post.md
