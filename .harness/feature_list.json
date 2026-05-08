@@ -1,0 +1,1394 @@
+{
+  "schema_version": "1.0",
+  "project": "huginn",
+  "generated_at": "2026-05-08T22:00:00Z",
+  "generated_by_session": 0,
+  "features": [
+    {
+      "id": "F001",
+      "category": "core",
+      "priority": 1,
+      "description": "CLI entry point runs with --help and exits 0",
+      "validation_steps": [
+        "cd huginn && pip install -e . 2>/dev/null",
+        "huginn --help",
+        "Assert exit code 0 and stdout contains 'Send out the ravens'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "cli.py with Click group, version 0.1.0"
+    },
+    {
+      "id": "F002",
+      "category": "core",
+      "priority": 1,
+      "description": "Package imports without error (huginn module is importable)",
+      "validation_steps": [
+        "python -c 'import huginn'",
+        "Assert exit code 0"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "huginn/__init__.py exists"
+    },
+    {
+      "id": "F003",
+      "category": "config",
+      "priority": 1,
+      "description": "Config loader creates ~/.huginn/ directory structure on first run",
+      "validation_steps": [
+        "python -c 'from huginn.config import get_huginn_home; h = get_huginn_home(); print(h)'",
+        "Assert exit code 0 and ~/.huginn/ directory exists with skills/, pipelines/, tasks/ subdirectories"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "config.py get_huginn_home() creates dirs on call"
+    },
+    {
+      "id": "F004",
+      "category": "config",
+      "priority": 1,
+      "description": "Config loader reads config.yaml with backend endpoints and creates defaults if missing",
+      "validation_steps": [
+        "python -c 'from huginn.config import load_config; c = load_config(); print(c[\"backends\"])'",
+        "Assert exit code 0 and output contains 'i3' and 'mac' keys"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "DEFAULT_CONFIG with i3 (192.168.2.135:11434) and mac (localhost:11434)"
+    },
+    {
+      "id": "F005",
+      "category": "config",
+      "priority": 2,
+      "description": "Config get_backend_url resolves backend name to Ollama URL and raises ValueError for unknown backend",
+      "validation_steps": [
+        "python -c 'from huginn.config import load_config, get_backend_url; c = load_config(); print(get_backend_url(c, \"i3\"))'",
+        "Assert stdout contains 'http://192.168.2.135:11434'",
+        "python -c 'from huginn.config import load_config, get_backend_url; c = load_config(); get_backend_url(c, \"nonexistent\")'",
+        "Assert exit code non-zero and stderr contains 'not found'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "get_backend_url raises ValueError with available backends listed"
+    },
+    {
+      "id": "F006",
+      "category": "skill-parser",
+      "priority": 2,
+      "description": "Skill parser reads YAML frontmatter and markdown body from .md skill files",
+      "validation_steps": [
+        "python -c 'from huginn.skill import parse_skill; from pathlib import Path; s = parse_skill(Path(\"huginn/pipelines/post-generator/skills/01-analyze.md\")); print(s.name, s.model, s.temperature)'",
+        "Assert stdout contains 'source-analyzer qwen2.5:7b 0.3'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Uses python-frontmatter, merges with OPTIONAL_DEFAULTS"
+    },
+    {
+      "id": "F007",
+      "category": "skill-parser",
+      "priority": 2,
+      "description": "Skill parser extracts verification rules from ## Verification section of skill body",
+      "validation_steps": [
+        "python -c 'from huginn.skill import parse_skill; from pathlib import Path; s = parse_skill(Path(\"huginn/pipelines/post-generator/skills/01-analyze.md\")); print(s.verification)'",
+        "Assert stdout contains 'Output must be valid JSON'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "_extract_verification parses numbered/bulleted items under ## Verification"
+    },
+    {
+      "id": "F008",
+      "category": "skill-parser",
+      "priority": 3,
+      "description": "Skill parser validates required fields and raises ValueError for missing name or model",
+      "validation_steps": [
+        "python -c 'from huginn.skill import parse_skill; from pathlib import Path; parse_skill(Path(\"nonexistent.md\"))'",
+        "Assert exit code non-zero and stderr contains 'not found'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Checks REQUIRED_FIELDS = ['name', 'model'], raises FileNotFoundError/ValueError"
+    },
+    {
+      "id": "F009",
+      "category": "skill-parser",
+      "priority": 3,
+      "description": "Skill parser exposes constraint properties (network_allowed, shell_allowed, timeout_minutes)",
+      "validation_steps": [
+        "python -c 'from huginn.skill import parse_skill; from pathlib import Path; s = parse_skill(Path(\"huginn/pipelines/post-generator/skills/01-analyze.md\")); print(s.network_allowed, s.shell_allowed, s.timeout_minutes)'",
+        "Assert stdout contains 'False False 60'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Properties on Skill dataclass reading from constraints dict"
+    },
+    {
+      "id": "F010",
+      "category": "manifest-parser",
+      "priority": 2,
+      "description": "Manifest parser reads manifest.yaml and returns Pipeline with staged definitions",
+      "validation_steps": [
+        "python -c 'from huginn.manifest import parse_manifest; from pathlib import Path; p = parse_manifest(Path(\"huginn/pipelines/post-generator\")); print(p.name, len(p.stages))'",
+        "Assert stdout contains 'post-generator 4'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "parse_manifest returns Pipeline dataclass with list of StageDefinition"
+    },
+    {
+      "id": "F011",
+      "category": "manifest-parser",
+      "priority": 2,
+      "description": "Manifest parser validates stage wiring — detects when a stage references an output no prior stage produces",
+      "validation_steps": [
+        "python -c 'from huginn.manifest import _validate_pipeline, Pipeline, StageDefinition; from pathlib import Path; p = Pipeline(name=\"test\", description=\"\", version=\"1\", pipeline_dir=Path(\".\"), defaults={}, stages=[StageDefinition(name=\"s1\", skill_path=\"x.md\", model=\"m\", backend=None, input=\"nonexistent.json\", output=\"out.md\")], on_complete={}); _validate_pipeline(p)'",
+        "Assert exit code non-zero and stderr contains 'validation failed'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "_validate_pipeline tracks available_outputs set across stages"
+    },
+    {
+      "id": "F012",
+      "category": "manifest-parser",
+      "priority": 3,
+      "description": "Manifest parser resolves model from skill file when not specified in stage definition",
+      "validation_steps": [
+        "grep -n 'skill = parse_skill' huginn/huginn/manifest.py",
+        "Assert output shows model resolution from skill file in parse_manifest"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Lines 87-96 of manifest.py: falls back to skill file for model/backend"
+    },
+    {
+      "id": "F013",
+      "category": "manifest-parser",
+      "priority": 3,
+      "description": "Manifest parser supports multi-input stages (YAML list for input field)",
+      "validation_steps": [
+        "python -c 'from huginn.manifest import parse_manifest; from pathlib import Path; p = parse_manifest(Path(\"huginn/pipelines/post-generator\")); s = p.stages[3]; print(type(s.input), s.input)'",
+        "Assert stdout shows list type with 'draft.md' and 'slop-report.json'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "StageDefinition.input typed as str | list[str]"
+    },
+    {
+      "id": "F014",
+      "category": "database",
+      "priority": 2,
+      "description": "SQLite schema creates tasks, stages, and runs tables with WAL mode",
+      "validation_steps": [
+        "python -c 'from huginn.db import HuginnDB; from pathlib import Path; import tempfile, os; p = Path(tempfile.mktemp(suffix=\".db\")); db = HuginnDB(p); print(\"ok\"); db.close(); os.unlink(p)'",
+        "Assert exit code 0 and stdout contains 'ok'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "SCHEMA DDL with tasks/stages/runs, WAL pragma, sqlite3.Row factory"
+    },
+    {
+      "id": "F015",
+      "category": "database",
+      "priority": 2,
+      "description": "Database supports create_task, update_task, get_task, and list_tasks operations",
+      "validation_steps": [
+        "python -c 'from huginn.db import HuginnDB; from pathlib import Path; import tempfile, os; p = Path(tempfile.mktemp(suffix=\".db\")); db = HuginnDB(p); tid = db.create_task(\"test\", \"/in\", \"/out\", 3); t = db.get_task(tid); print(t[\"pipeline_name\"], t[\"status\"]); db.close(); os.unlink(p)'",
+        "Assert stdout contains 'test queued'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "UUID-based IDs (8 chars), generic update_task with **kwargs"
+    },
+    {
+      "id": "F016",
+      "category": "database",
+      "priority": 3,
+      "description": "Database supports create_stage, update_stage, get_stages, log_run, and get_runs operations",
+      "validation_steps": [
+        "grep -c 'def create_stage\\|def update_stage\\|def get_stages\\|def log_run\\|def get_runs' huginn/huginn/db.py",
+        "Assert output is 5"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Full CRUD for stages and runs tables"
+    },
+    {
+      "id": "F017",
+      "category": "ollama-client",
+      "priority": 2,
+      "description": "Ollama client creates OpenAI-compatible client pointed at configurable endpoint",
+      "validation_steps": [
+        "python -c 'from huginn.ollama_client import get_client; c = get_client(\"http://localhost:11434\"); print(type(c).__name__)'",
+        "Assert stdout contains 'OpenAI'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "OpenAI client with base_url + /v1, api_key='ollama'"
+    },
+    {
+      "id": "F018",
+      "category": "ollama-client",
+      "priority": 2,
+      "description": "Ollama client provides complete() function that returns CompletionResult with content, tokens, duration",
+      "validation_steps": [
+        "grep -c 'class CompletionResult' huginn/huginn/ollama_client.py",
+        "Assert output is 1",
+        "grep 'content.*tokens_used.*duration_seconds.*model.*success' huginn/huginn/ollama_client.py",
+        "Assert match found showing all fields in the dataclass"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "CompletionResult dataclass, complete() wraps chat.completions.create"
+    },
+    {
+      "id": "F019",
+      "category": "ollama-client",
+      "priority": 3,
+      "description": "Ollama client provides check_backend_reachable and check_model_available utility functions",
+      "validation_steps": [
+        "grep -c 'def check_backend_reachable\\|def check_model_available' huginn/huginn/ollama_client.py",
+        "Assert output is 2"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "check_backend_reachable uses urllib, check_model_available lists models"
+    },
+    {
+      "id": "F020",
+      "category": "agent-loop",
+      "priority": 2,
+      "description": "Agent loop implements observe-think-act-verify-checkpoint cycle with configurable max iterations",
+      "validation_steps": [
+        "grep -c 'while ctx.iterations < ctx.max_iterations' huginn/huginn/agent.py",
+        "Assert output is 1",
+        "grep -c '_save_checkpoint\\|_load_checkpoint\\|_verify_output\\|_write_output' huginn/huginn/agent.py",
+        "Assert output is at least 4"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Full loop with iteration tracking, timeout check, retry on model failure"
+    },
+    {
+      "id": "F021",
+      "category": "agent-loop",
+      "priority": 2,
+      "description": "Agent loop retries model calls up to 3 times with exponential backoff on failure",
+      "validation_steps": [
+        "grep -A3 'retries = 0' huginn/huginn/agent.py",
+        "Assert output shows retry loop with sleep(2 ** retries)"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Retry block in run_agent after initial completion fails"
+    },
+    {
+      "id": "F022",
+      "category": "verification",
+      "priority": 2,
+      "description": "Verification engine checks word count, banned phrases, JSON validity, and containment rules",
+      "validation_steps": [
+        "grep -c 'words.*rule\\|banned.*phrase\\|valid json\\|must contain' huginn/huginn/agent.py",
+        "Assert output is at least 4"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "_verify_output with word count ranges, banned word list, JSON parse, regex containment"
+    },
+    {
+      "id": "F023",
+      "category": "verification",
+      "priority": 3,
+      "description": "Verification failures feed back into the agent loop as revision prompts within iteration budget",
+      "validation_steps": [
+        "grep -c '_build_revision_message' huginn/huginn/agent.py",
+        "Assert output is at least 2 (definition + call)"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "_build_revision_message includes prior output + failure list for next iteration"
+    },
+    {
+      "id": "F024",
+      "category": "checkpoint",
+      "priority": 2,
+      "description": "Checkpoint saves agent progress (iterations, tokens, history) to checkpoint.json in output dir",
+      "validation_steps": [
+        "grep -A5 'def _save_checkpoint' huginn/huginn/agent.py",
+        "Assert output shows JSON write with iterations, total_tokens, history, saved_at"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "_save_checkpoint writes JSON, _load_checkpoint reads and restores state"
+    },
+    {
+      "id": "F025",
+      "category": "checkpoint",
+      "priority": 3,
+      "description": "Agent loop loads checkpoint on resume and skips already-completed iterations",
+      "validation_steps": [
+        "grep -B2 -A5 '_load_checkpoint' huginn/huginn/agent.py",
+        "Assert output shows checkpoint loaded at start of run_agent, restoring iterations/tokens/history"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "run_agent checks for checkpoint before entering main loop"
+    },
+    {
+      "id": "F026",
+      "category": "executor",
+      "priority": 2,
+      "description": "Pipeline executor runs stages sequentially and wires outputs to next stage inputs",
+      "validation_steps": [
+        "grep -c '_wire_stage_inputs' huginn/huginn/executor.py",
+        "Assert output is at least 2 (definition + call)",
+        "grep '$pipeline_input' huginn/huginn/executor.py",
+        "Assert match found showing pipeline input handling"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "execute_pipeline loops stages, _wire_stage_inputs handles $pipeline_input and prior stage outputs"
+    },
+    {
+      "id": "F027",
+      "category": "executor",
+      "priority": 2,
+      "description": "Pipeline executor creates task directory with per-stage input/output subdirectories",
+      "validation_steps": [
+        "grep -c 'stage_input_dir\\|stage_output_dir' huginn/huginn/executor.py",
+        "Assert output is at least 4"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "task_dir/stages/{N}-{name}/input and /output, plus task_dir/input and /output"
+    },
+    {
+      "id": "F028",
+      "category": "executor",
+      "priority": 3,
+      "description": "Pipeline executor skips already-completed stages on resume (checks for existing output files)",
+      "validation_steps": [
+        "grep -A5 '_stage_completed' huginn/huginn/executor.py",
+        "Assert output shows check for output files beyond checkpoint.json"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "_stage_completed checks for non-checkpoint files in output dir"
+    },
+    {
+      "id": "F029",
+      "category": "executor",
+      "priority": 3,
+      "description": "Pipeline executor checks backend reachability and model availability before each stage",
+      "validation_steps": [
+        "grep -c 'check_backend_reachable\\|check_model_available' huginn/huginn/executor.py",
+        "Assert output is at least 2"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Pre-flight checks with clear error messages including pull command suggestion"
+    },
+    {
+      "id": "F030",
+      "category": "executor",
+      "priority": 3,
+      "description": "Pipeline executor copies final stage output to task output directory and honors on_complete.output_file",
+      "validation_steps": [
+        "grep -A10 'on_complete' huginn/huginn/executor.py",
+        "Assert output shows final output copy logic with on_complete output_file handling"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Copies all final stage output + searches for specific on_complete file"
+    },
+    {
+      "id": "F031",
+      "category": "executor",
+      "priority": 3,
+      "description": "Pipeline executor writes task metadata to meta.json with timing, stage results, and status",
+      "validation_steps": [
+        "grep -c '_save_meta' huginn/huginn/executor.py",
+        "Assert output is at least 3 (definition + calls in success and failure paths)"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "_save_meta writes JSON to task_dir/meta.json"
+    },
+    {
+      "id": "F032",
+      "category": "executor",
+      "priority": 4,
+      "description": "Pipeline executor records all stage results in SQLite (status, tokens, duration, verification)",
+      "validation_steps": [
+        "grep 'db.update_stage' huginn/huginn/executor.py",
+        "Assert output shows stage status, tokens_used, duration_seconds, verification_passed fields"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "db.update_stage called after each agent run with full result data"
+    },
+    {
+      "id": "F033",
+      "category": "agent-loop",
+      "priority": 3,
+      "description": "Agent loop enforces timeout_minutes and returns error result when exceeded",
+      "validation_steps": [
+        "grep -A3 'timeout_minutes' huginn/huginn/agent.py",
+        "Assert output shows elapsed time check against timeout with error return"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Timeout check at top of main while loop"
+    },
+    {
+      "id": "F034",
+      "category": "cli",
+      "priority": 2,
+      "description": "huginn run command accepts pipeline name and --input path, executes pipeline, prints task ID",
+      "validation_steps": [
+        "huginn run --help",
+        "Assert exit code 0 and stdout contains 'pipeline_name' and '--input'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Click command with pipeline_name arg, --input/-i required, --backend/-b optional"
+    },
+    {
+      "id": "F035",
+      "category": "cli",
+      "priority": 2,
+      "description": "huginn status command shows task status with per-stage progress table",
+      "validation_steps": [
+        "huginn status --help",
+        "Assert exit code 0 and stdout contains 'task_id'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Rich table with stage index, name, model, status, time, tokens, verified"
+    },
+    {
+      "id": "F036",
+      "category": "cli",
+      "priority": 2,
+      "description": "huginn pipelines command lists all available pipelines with name, stages count, description",
+      "validation_steps": [
+        "huginn pipelines --help",
+        "Assert exit code 0"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Rich table reading from list_pipelines()"
+    },
+    {
+      "id": "F037",
+      "category": "cli",
+      "priority": 2,
+      "description": "huginn skills command lists global skills with name, model, and backend",
+      "validation_steps": [
+        "huginn skills --help",
+        "Assert exit code 0"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Rich table reading from list_skills()"
+    },
+    {
+      "id": "F038",
+      "category": "cli",
+      "priority": 3,
+      "description": "huginn tasks command lists recent tasks with filtering by status and configurable limit",
+      "validation_steps": [
+        "huginn tasks --help",
+        "Assert exit code 0 and stdout contains '--limit' and '--status'"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Rich table with --limit/-n and --status/-s options"
+    },
+    {
+      "id": "F039",
+      "category": "pipeline",
+      "priority": 2,
+      "description": "post-generator starter pipeline exists with 4 stages (analyze, draft, slop-filter, revise)",
+      "validation_steps": [
+        "ls huginn/pipelines/post-generator/manifest.yaml",
+        "Assert file exists",
+        "ls huginn/pipelines/post-generator/skills/",
+        "Assert 4 skill files exist (01-analyze.md through 04-revise.md)"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Complete pipeline with manifest, 4 skills, voice-rules.md reference file"
+    },
+    {
+      "id": "F040",
+      "category": "orchestrator",
+      "priority": 4,
+      "description": "Pipeline creator orchestrator skill exists with SKILL.md, manifest schema reference, model reference, and skill format reference",
+      "validation_steps": [
+        "ls huginn/orchestrator/huginn-pipeline-creator/SKILL.md",
+        "Assert file exists",
+        "ls huginn/orchestrator/huginn-pipeline-creator/references/",
+        "Assert manifest-schema.md, available-models.md, skill-format.md exist"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "External orchestrator skill for Claude app pipeline creation sessions"
+    },
+    {
+      "id": "F041",
+      "category": "agent-loop",
+      "priority": 3,
+      "description": "Agent loop implements tool-call protocol — parses model output for tool invocations and executes them",
+      "validation_steps": [
+        "grep -c 'ACTION:\\|tool_call\\|parse_tool\\|execute_tool' huginn/huginn/agent.py",
+        "Assert output is at least 2 showing tool protocol implementation"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "CRITICAL GAP: Agent sends prompt and writes raw output. No tool parsing loop. Model cannot invoke file_read, web_search, etc."
+    },
+    {
+      "id": "F042",
+      "category": "tools",
+      "priority": 3,
+      "description": "file_read tool implementation allows agent to read files from input directory with path restriction",
+      "validation_steps": [
+        "grep -c 'def file_read\\|def tool_file_read' huginn/huginn/agent.py huginn/huginn/tools.py",
+        "Assert output is at least 1 showing file_read implementation"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F043",
+      "category": "tools",
+      "priority": 3,
+      "description": "file_write tool implementation allows agent to write files to output directory with path restriction",
+      "validation_steps": [
+        "grep -c 'def file_write\\|def tool_file_write' huginn/huginn/agent.py huginn/huginn/tools.py",
+        "Assert output is at least 1 showing file_write implementation"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F044",
+      "category": "tools",
+      "priority": 5,
+      "description": "web_search tool implementation calls a search backend (SearXNG/Brave/Tavily) and returns results to agent",
+      "validation_steps": [
+        "grep -c 'def web_search\\|def tool_web_search' huginn/huginn/agent.py huginn/huginn/tools.py",
+        "Assert output is at least 1 showing web_search implementation"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Phase 2 feature but critical for research pipelines like opensea-intel-briefing"
+    },
+    {
+      "id": "F045",
+      "category": "tools",
+      "priority": 5,
+      "description": "web_fetch tool implementation retrieves URL content and returns text to agent",
+      "validation_steps": [
+        "grep -c 'def web_fetch\\|def tool_web_fetch' huginn/huginn/agent.py huginn/huginn/tools.py",
+        "Assert output is at least 1 showing web_fetch implementation"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F046",
+      "category": "tools",
+      "priority": 6,
+      "description": "shell tool implementation executes commands in subprocess when skill allows shell: true",
+      "validation_steps": [
+        "grep -c 'def shell\\|def tool_shell' huginn/huginn/agent.py huginn/huginn/tools.py",
+        "Assert output is at least 1 showing shell implementation"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F047",
+      "category": "sandbox",
+      "priority": 4,
+      "description": "Worker Docker image exists with Dockerfile, agent.py, and tools.py for stage execution",
+      "validation_steps": [
+        "ls huginn/worker/Dockerfile huginn/worker/agent.py huginn/worker/tools.py",
+        "Assert all three files exist"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Spec calls for worker/ directory with Docker sandboxing per stage"
+    },
+    {
+      "id": "F048",
+      "category": "sandbox",
+      "priority": 4,
+      "description": "Stage executor creates Docker container per stage with correct volume mounts (input RO, output RW)",
+      "validation_steps": [
+        "grep -c 'docker\\|container' huginn/huginn/executor.py",
+        "Assert output is at least 3 showing Docker container lifecycle"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Executor currently runs agent directly in-process, no Docker isolation"
+    },
+    {
+      "id": "F049",
+      "category": "sandbox",
+      "priority": 5,
+      "description": "Docker containers restrict network to Ollama endpoint only when network: false",
+      "validation_steps": [
+        "grep -c 'network\\|NetworkMode' huginn/huginn/executor.py",
+        "Assert output shows network restriction configuration"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F050",
+      "category": "sandbox",
+      "priority": 5,
+      "description": "Docker containers enforce CPU and memory limits from config resource limits",
+      "validation_steps": [
+        "grep -c 'cpus\\|memory\\|resource_limits' huginn/huginn/executor.py",
+        "Assert output shows resource limit configuration"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F051",
+      "category": "sandbox",
+      "priority": 5,
+      "description": "Docker containers are removed after stage completion (cleanup on success and failure)",
+      "validation_steps": [
+        "grep -c 'container.remove\\|container.stop\\|cleanup' huginn/huginn/executor.py",
+        "Assert output shows container cleanup logic"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F052",
+      "category": "pipeline",
+      "priority": 5,
+      "description": "content-classifier starter pipeline exists with manifest and skills",
+      "validation_steps": [
+        "ls huginn/pipelines/content-classifier/manifest.yaml",
+        "Assert file exists"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Spec requires 3 starter pipelines, only post-generator exists"
+    },
+    {
+      "id": "F053",
+      "category": "pipeline",
+      "priority": 5,
+      "description": "code-reviewer starter pipeline exists with manifest and skills",
+      "validation_steps": [
+        "ls huginn/pipelines/code-reviewer/manifest.yaml",
+        "Assert file exists"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Spec requires 3 starter pipelines, only post-generator exists"
+    },
+    {
+      "id": "F054",
+      "category": "error-handling",
+      "priority": 6,
+      "description": "Pipeline executor provides clear error when Ollama backend is unreachable with retry suggestion",
+      "validation_steps": [
+        "grep -A3 'unreachable\\|Backend.*unreachable' huginn/huginn/executor.py",
+        "Assert output shows user-friendly error message"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "check_backend_reachable fails → clear error string with backend name and URL"
+    },
+    {
+      "id": "F055",
+      "category": "error-handling",
+      "priority": 6,
+      "description": "Pipeline executor provides clear error when model is not pulled with ollama pull command suggestion",
+      "validation_steps": [
+        "grep 'ollama pull' huginn/huginn/executor.py",
+        "Assert output shows pull command suggestion in error message"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "Error includes: 'Pull it with: docker exec -it ollama ollama pull {model}'"
+    },
+    {
+      "id": "F056",
+      "category": "error-handling",
+      "priority": 6,
+      "description": "Pipeline executor preserves partial output on stage failure (never deletes work)",
+      "validation_steps": [
+        "grep -c '_fail_task' huginn/huginn/executor.py",
+        "Assert output is at least 3 showing failure handling that preserves state"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "_fail_task updates meta and DB but does not delete task directory"
+    },
+    {
+      "id": "F057",
+      "category": "error-handling",
+      "priority": 7,
+      "description": "CLI commands handle all error types gracefully with colored output and non-zero exit codes",
+      "validation_steps": [
+        "grep -c 'sys.exit(1)' huginn/huginn/cli.py",
+        "Assert output is at least 3 showing error exits"
+      ],
+      "passes": true,
+      "passed_in_session": 0,
+      "notes": "FileNotFoundError, ValueError, generic Exception all caught with Rich colored output"
+    },
+    {
+      "id": "F058",
+      "category": "testing",
+      "priority": 7,
+      "description": "End-to-end test runs post-generator pipeline on sample input and verifies all stages complete",
+      "validation_steps": [
+        "find . -name 'test_*.py' -o -name '*_test.py'",
+        "Assert at least one test file exists",
+        "pytest --collect-only 2>/dev/null",
+        "Assert pytest discovers tests"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "No test files exist in the project"
+    },
+    {
+      "id": "F059",
+      "category": "testing",
+      "priority": 7,
+      "description": "Unit tests exist for config loader, skill parser, manifest parser, and verification engine",
+      "validation_steps": [
+        "find . -path '*/tests/*' -name '*.py'",
+        "Assert test files exist for core modules"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F060",
+      "category": "testing",
+      "priority": 8,
+      "description": "Checkpoint resilience test: interrupted pipeline resumes correctly and produces same final output",
+      "validation_steps": [
+        "grep -r 'checkpoint\\|resume' tests/",
+        "Assert checkpoint/resume test exists"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F061",
+      "category": "backend-abstraction",
+      "priority": 3,
+      "description": "Backend interface defines a common protocol for model inference providers (not Ollama-specific)",
+      "validation_steps": [
+        "grep -c 'class Backend\\|class InferenceBackend\\|class ModelBackend' huginn/huginn/backends.py",
+        "Assert output is at least 1 showing backend interface/protocol class"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Currently ollama_client.py is hardcoded to Ollama. Need abstract backend so we can add Anthropic API, vLLM, etc."
+    },
+    {
+      "id": "F062",
+      "category": "backend-abstraction",
+      "priority": 3,
+      "description": "Ollama backend implements the common backend interface with all existing functionality",
+      "validation_steps": [
+        "grep -c 'class OllamaBackend' huginn/huginn/backends.py huginn/huginn/backends/ollama.py",
+        "Assert output is at least 1"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Refactor existing ollama_client.py into backend interface implementation"
+    },
+    {
+      "id": "F063",
+      "category": "backend-abstraction",
+      "priority": 4,
+      "description": "Backend registry in config allows declaring multiple backends with type, URL, and capabilities",
+      "validation_steps": [
+        "python -c 'from huginn.config import load_config; c = load_config(); print(c[\"backends\"])'",
+        "Assert output shows backend entries with type field (e.g., type: ollama)"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Config should support: backends: {i3: {type: ollama, url: ...}, cloud: {type: anthropic, api_key_env: ...}}"
+    },
+    {
+      "id": "F064",
+      "category": "backend-abstraction",
+      "priority": 5,
+      "description": "Backend health monitoring checks all registered backends and reports status (reachable, models loaded, latency)",
+      "validation_steps": [
+        "grep -c 'def health\\|def check_health\\|def status' huginn/huginn/backends.py huginn/huginn/backends/base.py",
+        "Assert output is at least 1 showing health check method"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F065",
+      "category": "backend-abstraction",
+      "priority": 6,
+      "description": "huginn backends command lists all configured backends with type, URL, reachability, and loaded models",
+      "validation_steps": [
+        "huginn backends --help",
+        "Assert exit code 0 and stdout contains usage information"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F066",
+      "category": "tool-runtime",
+      "priority": 3,
+      "description": "Tool runtime abstraction separates tool execution from model inference — tools run where Huginn runs, not where the model runs",
+      "validation_steps": [
+        "grep -c 'class ToolRuntime\\|class ToolExecutor' huginn/huginn/tools.py huginn/huginn/tool_runtime.py",
+        "Assert output is at least 1 showing tool runtime class"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Core architectural piece: model is the brain (remote), tools are the hands (local to Huginn process)"
+    },
+    {
+      "id": "F067",
+      "category": "tool-runtime",
+      "priority": 3,
+      "description": "Tool registry maps tool names declared in skills to executable tool implementations with capability checking",
+      "validation_steps": [
+        "grep -c 'register_tool\\|tool_registry\\|get_tool' huginn/huginn/tools.py huginn/huginn/tool_runtime.py",
+        "Assert output is at least 2 showing registration and lookup"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Skills declare tools: [file_read, web_search]. Runtime resolves those names to implementations."
+    },
+    {
+      "id": "F068",
+      "category": "tool-runtime",
+      "priority": 4,
+      "description": "Tool execution enforces skill constraints — blocks network tools when network: false, blocks shell when shell: false",
+      "validation_steps": [
+        "grep -c 'constraint\\|allowed\\|permission\\|enforce' huginn/huginn/tool_runtime.py huginn/huginn/tools.py",
+        "Assert output is at least 2 showing constraint enforcement"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F069",
+      "category": "tool-runtime",
+      "priority": 5,
+      "description": "Tool execution logs all tool calls with arguments, results, and duration to the runs table",
+      "validation_steps": [
+        "grep -c 'log_run\\|tool_log\\|record_tool' huginn/huginn/tool_runtime.py huginn/huginn/agent.py",
+        "Assert output is at least 1 showing tool call logging"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Uses existing db.log_run() to record each tool invocation within a stage"
+    },
+    {
+      "id": "F070",
+      "category": "deployment",
+      "priority": 5,
+      "description": "Huginn daemon mode runs as long-lived process accepting pipeline submissions from a task queue",
+      "validation_steps": [
+        "huginn daemon --help",
+        "Assert exit code 0 and stdout contains usage information for daemon command"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Phase 3 feature. Background process that polls task queue and dispatches pipelines."
+    },
+    {
+      "id": "F071",
+      "category": "deployment",
+      "priority": 5,
+      "description": "HTTP API (FastAPI) exposes pipeline submission, task status, and backend health endpoints",
+      "validation_steps": [
+        "grep -c 'FastAPI\\|app = ' huginn/huginn/api.py huginn/huginn/server.py",
+        "Assert output is at least 1 showing FastAPI application"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Enables remote Huginn: submit pipelines over HTTP, query status remotely"
+    },
+    {
+      "id": "F072",
+      "category": "deployment",
+      "priority": 5,
+      "description": "API endpoint POST /tasks accepts pipeline name and input, queues task, returns task ID",
+      "validation_steps": [
+        "grep -c 'POST.*task\\|create_task\\|submit' huginn/huginn/api.py huginn/huginn/server.py",
+        "Assert output is at least 1 showing task submission endpoint"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F073",
+      "category": "deployment",
+      "priority": 5,
+      "description": "API endpoint GET /tasks/{id} returns task status with per-stage progress matching CLI status output",
+      "validation_steps": [
+        "grep -c 'GET.*task\\|get_task.*status' huginn/huginn/api.py huginn/huginn/server.py",
+        "Assert output is at least 1 showing task status endpoint"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F074",
+      "category": "deployment",
+      "priority": 6,
+      "description": "API endpoint GET /backends returns health status of all configured backends",
+      "validation_steps": [
+        "grep -c 'GET.*backend\\|backend.*health' huginn/huginn/api.py huginn/huginn/server.py",
+        "Assert output is at least 1 showing backends health endpoint"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F075",
+      "category": "deployment",
+      "priority": 6,
+      "description": "API authentication via API key or token for remote access security",
+      "validation_steps": [
+        "grep -c 'api_key\\|auth\\|token\\|authenticate' huginn/huginn/api.py huginn/huginn/server.py",
+        "Assert output is at least 1 showing authentication middleware"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F076",
+      "category": "deployment",
+      "priority": 6,
+      "description": "Huginn supports --remote flag or HUGINN_API_URL env var to send commands to a remote daemon instead of running locally",
+      "validation_steps": [
+        "grep -c 'HUGINN_API_URL\\|--remote\\|remote_url' huginn/huginn/cli.py huginn/huginn/client.py",
+        "Assert output is at least 1 showing remote mode support"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Same CLI, two modes: local execution or remote submission to daemon API"
+    },
+    {
+      "id": "F077",
+      "category": "scheduling",
+      "priority": 6,
+      "description": "Cron-style pipeline scheduling allows recurring pipeline execution on configurable schedule",
+      "validation_steps": [
+        "grep -c 'cron\\|schedule\\|recurring' huginn/huginn/scheduler.py huginn/huginn/daemon.py",
+        "Assert output is at least 1 showing scheduling implementation"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Phase 3 feature. content-factory nightly, slack-digest mornings, etc."
+    },
+    {
+      "id": "F078",
+      "category": "scheduling",
+      "priority": 7,
+      "description": "huginn schedule command creates, lists, and removes scheduled pipeline runs",
+      "validation_steps": [
+        "huginn schedule --help",
+        "Assert exit code 0 and stdout contains usage information"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F079",
+      "category": "parallel",
+      "priority": 6,
+      "description": "Pipeline executor supports parallel stage execution when stages have no data dependencies",
+      "validation_steps": [
+        "grep -c 'parallel\\|concurrent\\|ThreadPool\\|asyncio' huginn/huginn/executor.py",
+        "Assert output is at least 1 showing parallel execution support"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Fan-out/fan-in pattern: stages reading $pipeline_input can run simultaneously"
+    },
+    {
+      "id": "F080",
+      "category": "parallel",
+      "priority": 6,
+      "description": "Task queue supports multiple concurrent pipeline executions with resource-aware scheduling",
+      "validation_steps": [
+        "grep -c 'queue\\|worker_pool\\|max_parallel' huginn/huginn/daemon.py huginn/huginn/queue.py",
+        "Assert output is at least 1 showing queue with concurrency control"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Respects config max_parallel_workers to prevent backend overload"
+    },
+    {
+      "id": "F081",
+      "category": "parallel",
+      "priority": 7,
+      "description": "Cross-backend dispatch routes stages to appropriate backends based on model requirements and backend capabilities",
+      "validation_steps": [
+        "grep -c 'dispatch\\|route.*backend\\|select_backend' huginn/huginn/executor.py huginn/huginn/dispatch.py",
+        "Assert output is at least 1 showing backend routing logic"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Big models → mac backend, small models → i3 backend, based on model size and backend capabilities"
+    },
+    {
+      "id": "F082",
+      "category": "dashboard",
+      "priority": 7,
+      "description": "Dashboard API provides real-time pipeline progress via SSE or WebSocket stream",
+      "validation_steps": [
+        "grep -c 'SSE\\|WebSocket\\|EventSource\\|stream' huginn/huginn/api.py huginn/huginn/server.py",
+        "Assert output is at least 1 showing real-time streaming"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Enables live dashboard updates as ravens progress through stages"
+    },
+    {
+      "id": "F083",
+      "category": "dashboard",
+      "priority": 7,
+      "description": "Dashboard API endpoint GET /ravens returns all active tasks across all backends with current stage and progress",
+      "validation_steps": [
+        "grep -c 'ravens\\|active_tasks\\|running_tasks' huginn/huginn/api.py huginn/huginn/server.py",
+        "Assert output is at least 1 showing ravens overview endpoint"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Follow the ravens — see all active pipelines, which stage they're on, which backend they're using"
+    },
+    {
+      "id": "F084",
+      "category": "dashboard",
+      "priority": 8,
+      "description": "Dashboard web UI renders pipeline progress, backend status, and task history in a browser",
+      "validation_steps": [
+        "ls huginn/dashboard/index.html huginn/dashboard/package.json",
+        "Assert dashboard frontend files exist"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Web frontend consuming the dashboard API. Shows ravens flying across backends."
+    },
+    {
+      "id": "F085",
+      "category": "dashboard",
+      "priority": 8,
+      "description": "Dashboard shows per-backend utilization — active models, queue depth, inference latency",
+      "validation_steps": [
+        "grep -c 'utilization\\|queue_depth\\|latency' huginn/huginn/api.py huginn/huginn/server.py",
+        "Assert output is at least 1 showing backend utilization metrics"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F086",
+      "category": "deployment",
+      "priority": 7,
+      "description": "Docker Compose file for running Huginn daemon with API server as a deployable service",
+      "validation_steps": [
+        "ls docker-compose.yml",
+        "Assert file exists",
+        "grep -c 'huginn' docker-compose.yml",
+        "Assert output is at least 1"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Compose for daemon + API. Separate from per-stage Docker sandboxing."
+    },
+    {
+      "id": "F087",
+      "category": "deployment",
+      "priority": 8,
+      "description": "Webhook notifications fire on pipeline completion or failure to configurable HTTP endpoints",
+      "validation_steps": [
+        "grep -c 'webhook\\|notify\\|callback_url' huginn/huginn/executor.py huginn/huginn/notifications.py",
+        "Assert output is at least 1 showing webhook implementation"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F088",
+      "category": "cli",
+      "priority": 7,
+      "description": "huginn cancel command stops a running task and preserves partial output",
+      "validation_steps": [
+        "huginn cancel --help",
+        "Assert exit code 0 and stdout contains usage information"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F089",
+      "category": "cli",
+      "priority": 7,
+      "description": "huginn logs command streams or tails agent output for a running or completed task",
+      "validation_steps": [
+        "huginn logs --help",
+        "Assert exit code 0 and stdout contains usage information"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F090",
+      "category": "cli",
+      "priority": 7,
+      "description": "huginn batch command submits multiple inputs to the same pipeline as separate tasks",
+      "validation_steps": [
+        "huginn batch --help",
+        "Assert exit code 0 and stdout contains usage information"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F091",
+      "category": "remote-client",
+      "priority": 4,
+      "description": "Huginn client library provides Python API for submitting tasks to a remote daemon (POST /tasks with pipeline name and input payload)",
+      "validation_steps": [
+        "grep -c 'class HuginnClient\\|class RemoteClient' huginn/huginn/client.py",
+        "Assert output is at least 1 showing client class",
+        "grep -c 'def submit\\|def run_remote' huginn/huginn/client.py",
+        "Assert output is at least 1 showing task submission method"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Thin HTTP client wrapping the daemon API. Used by CLI in remote mode and by external integrations."
+    },
+    {
+      "id": "F092",
+      "category": "remote-client",
+      "priority": 4,
+      "description": "Remote client uploads input files to daemon as part of task submission (multipart or base64 payload)",
+      "validation_steps": [
+        "grep -c 'upload\\|multipart\\|input_payload\\|file_content' huginn/huginn/client.py",
+        "Assert output is at least 1 showing input upload in submit flow"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Local huginn run reads from disk. Remote submit must send the file contents over HTTP."
+    },
+    {
+      "id": "F093",
+      "category": "remote-client",
+      "priority": 4,
+      "description": "Remote client polls task status and returns structured progress (stage name, percent, elapsed time)",
+      "validation_steps": [
+        "grep -c 'def status\\|def get_status\\|def poll' huginn/huginn/client.py",
+        "Assert output is at least 1 showing status polling method"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F094",
+      "category": "remote-client",
+      "priority": 4,
+      "description": "huginn output command retrieves and displays final output from a completed task (local or remote)",
+      "validation_steps": [
+        "huginn output --help",
+        "Assert exit code 0 and stdout contains 'task_id'"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Core set-and-forget UX: submit task, walk away, come back, huginn output <id> to see results."
+    },
+    {
+      "id": "F095",
+      "category": "remote-client",
+      "priority": 5,
+      "description": "huginn output command supports --download flag to save remote task outputs to local directory",
+      "validation_steps": [
+        "huginn output --help",
+        "Assert stdout contains '--download' or '--save' flag"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Download all output files from a remote task to ./huginn-output/<task-id>/ or specified path"
+    },
+    {
+      "id": "F096",
+      "category": "remote-client",
+      "priority": 5,
+      "description": "API endpoint GET /tasks/{id}/output returns task output files as downloadable archive or individual files",
+      "validation_steps": [
+        "grep -c 'output.*download\\|GET.*output\\|FileResponse' huginn/huginn/api.py huginn/huginn/server.py",
+        "Assert output is at least 1 showing output retrieval endpoint"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F097",
+      "category": "async-execution",
+      "priority": 4,
+      "description": "huginn run --background flag queues pipeline locally and returns task ID immediately without blocking",
+      "validation_steps": [
+        "huginn run --help",
+        "Assert stdout contains '--background' or '--bg' flag"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Local set-and-forget: huginn run post-generator --input draft.md --bg → returns task ID, runs in background"
+    },
+    {
+      "id": "F098",
+      "category": "async-execution",
+      "priority": 4,
+      "description": "Local background execution runs pipeline in a detached process that survives terminal close",
+      "validation_steps": [
+        "grep -c 'subprocess\\|daemon\\|fork\\|detach\\|background' huginn/huginn/executor.py huginn/huginn/background.py",
+        "Assert output is at least 1 showing background execution mechanism"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Must survive terminal close. Write PID to task dir for status/cancel."
+    },
+    {
+      "id": "F099",
+      "category": "async-execution",
+      "priority": 5,
+      "description": "huginn status shows both local background tasks and remote tasks in unified view",
+      "validation_steps": [
+        "grep -c 'background\\|remote\\|local' huginn/huginn/cli.py",
+        "Assert output is at least 2 showing unified status across execution modes"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Same huginn status command works for: blocking local, background local, remote tasks"
+    },
+    {
+      "id": "F100",
+      "category": "async-execution",
+      "priority": 5,
+      "description": "huginn tasks shows task source (local, background, remote) and allows filtering by source",
+      "validation_steps": [
+        "huginn tasks --help",
+        "Assert stdout contains '--source' or execution mode filter"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F101",
+      "category": "notifications",
+      "priority": 6,
+      "description": "Notification system fires configurable alerts on task completion or failure (webhook, stdout, file)",
+      "validation_steps": [
+        "grep -c 'class Notifier\\|def notify\\|notification' huginn/huginn/notifications.py",
+        "Assert output is at least 1 showing notification system"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Set-and-forget needs a 'done' signal. Start with file touch + stdout. Webhooks come later."
+    },
+    {
+      "id": "F102",
+      "category": "notifications",
+      "priority": 6,
+      "description": "Config supports notification preferences per pipeline — on_complete and on_failure hooks",
+      "validation_steps": [
+        "grep -c 'on_complete\\|on_failure\\|notify' huginn/huginn/config.py huginn/huginn/notifications.py",
+        "Assert output is at least 2 showing configurable notification hooks"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "manifest.yaml on_complete already exists — extend with notify: {webhook: url, stdout: true}"
+    },
+    {
+      "id": "F103",
+      "category": "notifications",
+      "priority": 7,
+      "description": "Desktop notification (macOS) fires when a background or remote task completes",
+      "validation_steps": [
+        "grep -c 'osascript\\|terminal-notifier\\|notification_center\\|desktop_notify' huginn/huginn/notifications.py",
+        "Assert output is at least 1 showing desktop notification"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "macOS: osascript or terminal-notifier. Low effort, high value for set-and-forget on laptop."
+    },
+    {
+      "id": "F104",
+      "category": "remote-client",
+      "priority": 5,
+      "description": "Config profile system allows named remote targets (huginn --target heimdall run ...) with stored URL and auth",
+      "validation_steps": [
+        "grep -c 'target\\|profile\\|remote.*config' huginn/huginn/config.py huginn/huginn/client.py",
+        "Assert output is at least 1 showing target/profile configuration"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "config.yaml remotes: {heimdall: {url: http://192.168.2.135:8080, api_key_env: HUGINN_HEIMDALL_KEY}}"
+    },
+    {
+      "id": "F105",
+      "category": "remote-client",
+      "priority": 6,
+      "description": "huginn connect command tests connectivity to a remote daemon and reports version, pipeline count, and backend status",
+      "validation_steps": [
+        "huginn connect --help",
+        "Assert exit code 0 and stdout contains usage information"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Quick validation that remote target is reachable and healthy before submitting work"
+    }
+  ],
+  "categories": ["core", "config", "skill-parser", "manifest-parser", "database", "ollama-client", "agent-loop", "verification", "checkpoint", "executor", "cli", "pipeline", "orchestrator", "tools", "sandbox", "error-handling", "testing", "backend-abstraction", "tool-runtime", "deployment", "scheduling", "parallel", "dashboard", "remote-client", "async-execution", "notifications"],
+  "immutable_after_session_0": true
+}

@@ -1,0 +1,17 @@
+[project]
+name = "huginn"
+type = "cli"
+description = "Skill-based LLM pipeline system for local infrastructure"
+
+[validation]
+min_features = 30
+runner = "pytest"
+
+[cli]
+entry_point = "huginn"
+package_dir = "huginn"
+
+[security]
+no_eval = true
+validate_inputs = true
+no_hardcoded_secrets = true
