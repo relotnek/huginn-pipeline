@@ -115,6 +115,14 @@ class HuginnDB:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_task_backends(self, task_id: str) -> list[str]:
+        """Return distinct backends used by a task's stages."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT backend FROM stages WHERE task_id = ? AND backend IS NOT NULL",
+            (task_id,),
+        ).fetchall()
+        return sorted(r["backend"] for r in rows)
+
     # --- Stages ---
 
     def create_stage(

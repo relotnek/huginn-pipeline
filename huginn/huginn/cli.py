@@ -109,8 +109,14 @@ def status(task_id: str):
     # Show resume hint for resumable statuses
     resumable = task["status"] in ("interrupted", "cancelled", "failed")
 
+    # Get stages to determine backend(s) used
+    stages = db.get_stages(task_id)
+    backends_used = sorted(set(s["backend"] for s in stages if s["backend"])) if stages else []
+    backend_str = ", ".join(backends_used) if backends_used else "-"
+
     console.print(f"\n[bold]Task {task_id}[/bold] — [{status_color}]{task['status']}[/{status_color}]")
     console.print(f"  Pipeline: {task['pipeline_name']}")
+    console.print(f"  Backend:  {backend_str}")
     console.print(f"  Input:    {task['input_path']}")
     if resumable:
         console.print(f"  [dim]Resume with: huginn resume {task_id}[/dim]")
@@ -122,13 +128,13 @@ def status(task_id: str):
         console.print(f"  [red]Error: {task['error_message']}[/red]")
 
     # Stage details
-    stages = db.get_stages(task_id)
     if stages:
         console.print()
         table = Table(title="Stages")
         table.add_column("#", style="dim", width=3)
         table.add_column("Name", min_width=15)
-        table.add_column("Model", min_width=15)
+        table.add_column("Model", min_width=12)
+        table.add_column("Backend", min_width=8)
         table.add_column("Status", min_width=10)
         table.add_column("Time", justify="right")
         table.add_column("Tokens", justify="right")
@@ -140,6 +146,7 @@ def status(task_id: str):
                 "running": "yellow",
                 "failed": "red",
                 "pending": "dim",
+                "cancelled": "dim",
             }.get(s["status"], "white")
 
             time_str = f"{s['duration_seconds']:.1f}s" if s["duration_seconds"] else "-"
@@ -150,6 +157,7 @@ def status(task_id: str):
                 str(s["stage_index"] + 1),
                 s["stage_name"],
                 s["model"] or "-",
+                s["backend"] or "-",
                 f"[{s_color}]{s['status']}[/{s_color}]",
                 time_str,
                 tokens_str,
@@ -253,6 +261,7 @@ def tasks(limit: int, filter_status: str | None):
     table = Table(title="Recent Tasks")
     table.add_column("ID", width=10)
     table.add_column("Pipeline", min_width=15)
+    table.add_column("Backend", min_width=8)
     table.add_column("Status", min_width=10)
     table.add_column("Stages")
     table.add_column("Queued", min_width=20)
@@ -264,14 +273,18 @@ def tasks(limit: int, filter_status: str | None):
             "failed": "red",
             "queued": "blue",
             "interrupted": "magenta",
+            "cancelled": "dim",
         }.get(t["status"], "white")
 
         stage_str = f"{t['current_stage']}/{t['total_stages']}" if t["total_stages"] else "-"
         queued = t["queued_at"][:19] if t["queued_at"] else "-"
+        backends = db.get_task_backends(t["id"])
+        backend_str = ", ".join(backends) if backends else "-"
 
         table.add_row(
             t["id"],
             t["pipeline_name"],
+            backend_str,
             f"[{s_color}]{t['status']}[/{s_color}]",
             stage_str,
             queued,
