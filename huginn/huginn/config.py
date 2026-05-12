@@ -9,8 +9,8 @@ import yaml
 
 DEFAULT_CONFIG = {
     "backends": {
-        "i3": {"url": "http://192.168.2.135:11434"},
-        "mac": {"url": "http://localhost:11434"},
+        "i3": {"type": "ollama", "url": "http://192.168.2.135:11434"},
+        "mac": {"type": "ollama", "url": "http://localhost:11434"},
     },
     "default_backend": "i3",
     "max_parallel_workers": 2,
@@ -62,7 +62,21 @@ def save_config(config: dict[str, Any]) -> None:
 
 
 def get_backend_url(config: dict[str, Any], backend_name: str | None = None) -> str:
-    """Resolve a backend name to an Ollama URL."""
+    """Resolve a backend name to its URL. Kept for backwards compatibility."""
+    return get_backend_config(config, backend_name)["url"]
+
+
+def get_backend_config(config: dict[str, Any], backend_name: str | None = None) -> dict[str, Any]:
+    """Resolve a backend name to its full config dict.
+
+    Returns dict with at minimum: type, url. May also include api_key_env,
+    extra_headers, and other backend-specific settings.
+
+    Backend types:
+      - ollama: Local Ollama instance (default, api_key ignored)
+      - openrouter: OpenRouter API (requires api_key_env)
+      - openai_compatible: Any OpenAI-compatible endpoint
+    """
     name = backend_name or config["default_backend"]
     backends = config.get("backends", {})
 
@@ -70,4 +84,7 @@ def get_backend_url(config: dict[str, Any], backend_name: str | None = None) -> 
         available = ", ".join(backends.keys())
         raise ValueError(f"Backend '{name}' not found. Available: {available}")
 
-    return backends[name]["url"]
+    backend = dict(backends[name])
+    backend.setdefault("type", "ollama")
+    backend["name"] = name
+    return backend

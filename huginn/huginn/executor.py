@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent import AgentContext, AgentResult, run_agent
-from .config import get_backend_url, get_huginn_home, load_config
+from .config import get_backend_config, get_backend_url, get_huginn_home, load_config
 from .db import HuginnDB
 from .manifest import Pipeline, StageDefinition, parse_manifest
 from .ollama_client import check_backend_reachable, check_model_available, get_client
@@ -20,8 +20,12 @@ def execute_pipeline(
     input_path: Path,
     backend_override: str | None = None,
     verbose: bool = False,
+    task_id: str | None = None,
 ) -> dict[str, Any]:
-    """Execute a pipeline end-to-end. Returns task result dict."""
+    """Execute a pipeline end-to-end. Returns task result dict.
+
+    When task_id is provided, reuses an existing task record (for background mode).
+    """
     config = load_config()
     huginn_home = get_huginn_home()
     db = HuginnDB(huginn_home / "huginn.db")
@@ -35,13 +39,16 @@ def execute_pipeline(
 
     pipeline = parse_manifest(pipeline_dir)
 
-    # Create task directory
-    task_id = db.create_task(
-        pipeline_name=pipeline.name,
-        input_path=str(input_path),
-        output_path="",  # Set after creation
-        total_stages=len(pipeline.stages),
-    )
+    # Create or reuse task record
+    if task_id:
+        db.update_task(task_id, total_stages=len(pipeline.stages))
+    else:
+        task_id = db.create_task(
+            pipeline_name=pipeline.name,
+            input_path=str(input_path),
+            output_path="",
+            total_stages=len(pipeline.stages),
+        )
 
     task_dir = huginn_home / "tasks" / task_id
     task_dir.mkdir(parents=True, exist_ok=True)
@@ -93,20 +100,27 @@ def execute_pipeline(
 
         # Resolve backend
         backend_name = backend_override or stage_def.backend or pipeline.default_backend or config["default_backend"]
-        backend_url = get_backend_url(config, backend_name)
+        backend_cfg = get_backend_config(config, backend_name)
+        backend_url = backend_cfg["url"]
+        backend_type = backend_cfg.get("type", "ollama")
 
         # Check backend reachability
-        if not check_backend_reachable(backend_url):
+        if not check_backend_reachable(backend_url, backend_cfg):
             error = f"Backend '{backend_name}' ({backend_url}) is unreachable"
             _fail_task(db, task_id, meta, task_dir, error)
             return {"task_id": task_id, "status": "failed", "error": error}
 
         # Check model availability
-        client = get_client(backend_url)
-        if not check_model_available(client, stage_def.model):
+        client = get_client(backend_url, backend_cfg)
+        if not check_model_available(client, stage_def.model, backend_cfg):
+            if backend_type == "ollama":
+                hint = f"Pull it with: docker exec -it ollama ollama pull {stage_def.model}"
+            elif backend_type == "openrouter":
+                hint = f"Check available models at https://openrouter.ai/models"
+            else:
+                hint = "Check that the model name is correct for this backend"
             error = (
-                f"Model '{stage_def.model}' not available on '{backend_name}'. "
-                f"Pull it with: docker exec -it ollama ollama pull {stage_def.model}"
+                f"Model '{stage_def.model}' not available on '{backend_name}'. {hint}"
             )
             _fail_task(db, task_id, meta, task_dir, error)
             return {"task_id": task_id, "status": "failed", "error": error}
@@ -151,6 +165,8 @@ def execute_pipeline(
             output_dir=stage_output_dir,
             files_dir=stage_files_dir if stage_def.files else None,
             verification_rules=verification,
+            tools=stage_def.tools,
+            backend_config=backend_cfg,
             timeout_minutes=stage_def.timeout_minutes,
         )
 

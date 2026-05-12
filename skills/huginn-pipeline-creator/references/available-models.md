@@ -42,33 +42,10 @@ Mixture of Experts (MoE) models like `qwen3:30b-a3b` have many total parameters 
 - They use more RAM than their active param count suggests (still need ~18GB)
 - Perfect for the i3 where CPU speed is the bottleneck
 
-## OpenRouter (cloud, pay-per-token)
-
-OpenRouter provides access to 300+ models from all major providers. Use when you need frontier-model quality or models not available locally.
-
-| Model | Provider | Best For |
-|-------|----------|----------|
-| anthropic/claude-sonnet-4.6 | Anthropic | Complex reasoning, analysis, code review |
-| anthropic/claude-haiku-4.5 | Anthropic | Fast, cheap classification and extraction |
-| meta-llama/llama-3.3-70b | Meta | Strong open-weight reasoning |
-| google/gemini-flash-2.0 | Google | Fast multimodal tasks |
-
-OpenRouter model names use `provider/model` format. Configure in `~/.huginn/config.yaml`:
-```yaml
-backends:
-  openrouter:
-    type: openrouter
-    url: https://openrouter.ai/api/v1
-    api_key_env: OPENROUTER_API_KEY
-```
-
-Browse all models: https://openrouter.ai/models
-
 ## Backend Selection
 
-- **i3**: For always-on tasks, overnight batch processing, anything that needs to be available 24/7. Free inference, data stays local.
-- **mac**: For quality-critical stages (prose generation, complex reasoning), or when speed matters and the laptop is available. Free inference, data stays local.
-- **openrouter**: For frontier-model quality when local models aren't enough, or models not available locally. Pay-per-token, data goes to provider.
-- **Mixed**: Route cheap stages (classify, filter, check) to i3, expensive stages (generate, reason) to Mac or OpenRouter.
+- **i3**: For always-on tasks, overnight batch processing, anything that needs to be available 24/7
+- **mac**: For quality-critical stages (prose generation, complex reasoning), or when speed matters and the laptop is available
+- **Mixed**: Route cheap stages (classify, filter, check) to i3, expensive stages (generate, reason) to Mac
 
-Always check model availability before assigning: `docker exec -it ollama ollama list` (i3) or `ollama list` (Mac). OpenRouter models are always available if you have credits.
+Always check model availability before assigning: `docker exec -it ollama ollama list` (i3) or `ollama list` (Mac)

@@ -44,15 +44,17 @@ Core insight: frontier intelligence authors skills (once), local models execute 
 
 ### Infrastructure
 
-- **Ollama backends**: MacBook Pro M3 Max (big models, localhost:11434) and i3 server "heimdall" (small models, 192.168.2.135:11434)
-- **Models**: qwen3:8b (analysis), qwen3:30b-a3b (MoE workhorse), qwen3.6:27b (best prose, Mac only), nomic-embed-text (embeddings), qwen2.5:0.5b (fast classification)
+- **Backends**: MacBook Pro M3 Max (type: ollama, localhost:11434), i3 server "heimdall" (type: ollama, 192.168.2.135:11434), OpenRouter (type: openrouter, 300+ cloud models via API key)
+- **Models**: qwen3:8b (analysis), qwen3:30b-a3b (MoE workhorse), qwen3.6:27b (best prose, Mac only), nomic-embed-text (embeddings), qwen2.5:0.5b (fast classification). OpenRouter: anthropic/claude-sonnet-4.6, meta-llama/llama-3.3-70b, etc.
 - **Database**: SQLite with tables for tasks, stages, runs
 
 ## Technology Stack
 
 - Python 3.11+ CLI application
-- Docker for worker sandboxing
+- Docker for worker sandboxing (planned)
 - Ollama (OpenAI-compatible API) for local model inference
+- OpenRouter for cloud model access (Claude, GPT, Llama, 300+ models)
+- Any OpenAI-compatible endpoint (vLLM, TGI, etc.)
 - SQLite for task queue, run history, checkpoints
 - Anthropic API (Claude Opus) for Orchestrator (Phase 2)
 
@@ -60,29 +62,31 @@ Core insight: frontier intelligence authors skills (once), local models execute 
 
 **This is a greenfield project.** See `huginn-spec.md` for the full specification and `huginn-overview.md` for the design philosophy.
 
-### Phase 1 Implementation Tasks (in order)
+### Implementation Status
 
-1. Project structure: CLI entry point, config loader, skill parser
-2. config.yaml parser (endpoints, defaults, limits)
-3. manifest.yaml parser with validation
-4. Skill file parser (YAML frontmatter + markdown)
-5. SQLite schema (tasks, stages, runs)
-6. Worker Docker image (agent.py + tools.py)
-7. Agent loop implementation
-8. file_read and file_write tools with path restrictions
-9. Ollama client (OpenAI-compatible, configurable endpoint)
-10. Verification engine
-11. Checkpoint/resume logic
-12. Stage executor (container lifecycle)
-13. Stage chaining (output → input wiring)
-14. CLI commands: `huginn run`, `huginn status`, `huginn pipelines`, `huginn skills`
-15. Timeout enforcement and container cleanup
-16. Starter pipelines: post-generator, content-classifier, code-reviewer
-17. End-to-end testing
+See `.harness/feature_list.json` for the full 105-feature tracking list and `.harness/development-summary.md` for architecture and priority order.
+
+**Done:**
+- CLI (run, status, pipelines, skills, tasks, logs), config loader, skill parser, manifest parser
+- SQLite schema, Ollama client, agent loop with tool-call protocol (OpenAI function calling)
+- file_read/file_write tools with path restrictions
+- Verification engine, checkpoint/resume, stage chaining
+- Multi-backend support (ollama, openrouter, openai_compatible)
+- Background execution (--bg flag, detached process)
+- post-generator starter pipeline
+
+**Not yet built:**
+- Docker sandboxing per stage
+- web_search, web_fetch, shell tools
+- content-classifier and code-reviewer starter pipelines
+- HTTP API / daemon mode / remote execution
+- Dashboard
+- Tests
 
 ## Design Principles
 
 - **Skill is the product**: the system prompt, constraints, and verification rules are what make a 7B model perform — invest effort there
 - **Never delete partial work**: on failure, preserve output and checkpoint for resume
-- **Error recovery**: Ollama unreachable → retry 3x with backoff; model not loaded → suggest pull command; container OOM → fail stage, suggest smaller model; checkpoint corruption → restart stage, warn
-- **Each stage is fully isolated**: can only see its declared inputs, reference files, and the Ollama API
+- **Error recovery**: Backend unreachable → retry 3x with backoff; model not loaded → suggest pull command (Ollama) or check models page (OpenRouter); checkpoint corruption → restart stage, warn
+- **Each stage is fully isolated**: can only see its declared inputs, reference files, and its assigned backend API
+- **Brain/hands separation**: Model inference (brain) runs on backends. Tool execution (hands) runs where Huginn runs. These are independently deployable.

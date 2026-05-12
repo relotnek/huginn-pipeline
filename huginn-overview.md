@@ -177,20 +177,28 @@ This means a misbehaving model can't leak data, overwrite files, or take down th
 
 ## Infrastructure
 
-### Current Hardware
+### Backends
+
+Huginn supports multiple backend types. Each backend is an inference endpoint — the "brain" that generates text. Tools run locally where Huginn runs (the "hands").
 
 ```
-┌───────────────────────┐     ┌─────────────────────────┐
-│  MacBook Pro M3 Max   │     │  i3 Server (heimdall)   │
-│  64GB unified memory  │     │  32GB RAM, Debian        │
-│  Ollama (native)      │     │  Ollama (Docker)         │
-│  Big models: 27B-70B  │     │  Small models: 0.5B-8B   │
-│  Overnight batch jobs  │     │  Always-on API server    │
-│  localhost:11434      │     │  192.168.2.135:11434     │
-└───────────────────────┘     └─────────────────────────┘
+┌───────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────┐
+│  MacBook Pro M3 Max   │     │  i3 Server (heimdall)   │     │  OpenRouter (cloud)  │
+│  64GB unified memory  │     │  32GB RAM, Debian        │     │  300+ models         │
+│  Ollama (native)      │     │  Ollama (Docker)         │     │  Claude, GPT, Llama  │
+│  Big models: 27B-70B  │     │  Small models: 0.5B-8B   │     │  Pay-per-token       │
+│  Overnight batch jobs  │     │  Always-on API server    │     │  API key auth        │
+│  type: ollama         │     │  type: ollama            │     │  type: openrouter    │
+│  localhost:11434      │     │  192.168.2.135:11434     │     │  openrouter.ai/api   │
+└───────────────────────┘     └─────────────────────────┘     └─────────────────────┘
 ```
 
-Pipelines can route stages to different backends. The manifest specifies which backend each stage uses — analysis and filtering on the i3 (small fast models), prose generation on the Mac (big models), or wherever the right model is available.
+Pipelines can route stages to different backends. The manifest specifies which backend each stage uses — analysis and filtering on the i3 (small fast models), prose generation on the Mac (big models), heavy reasoning on OpenRouter (frontier models), or wherever the right model is available.
+
+Backend types:
+- **ollama** — Local Ollama instance, no API key needed
+- **openrouter** — Unified API for 300+ models (Claude, GPT, Llama, Gemini, etc.). Requires API key via environment variable.
+- **openai_compatible** — Any OpenAI-compatible endpoint (vLLM, TGI, etc.)
 
 ### Models
 
@@ -227,11 +235,15 @@ Scope description → enumerate STRIDE threats → score risks → plan remediat
 
 ## Roadmap
 
-**Phase 1 — Runner (current)**: Hand-write pipeline folders, run them with `huginn run`. Sequential stages, Docker sandboxing, checkpoint/resume, verification.
+**Phase 1 — Runner (current)**: Hand-write pipeline folders, run them with `huginn run`. Sequential stages, checkpoint/resume, verification, tool calling, multi-backend support (Ollama, OpenRouter, any OpenAI-compatible), background execution.
 
-**Phase 2 — Orchestrator**: `huginn create` uses Opus to design pipelines interactively. Full validation cycle. Shell and network tools with per-skill permissions.
+**Phase 2 — Orchestrator**: `huginn create` uses Opus to design pipelines interactively. Full validation cycle. Web search and shell tools with per-skill permissions.
 
-**Phase 3 — Infrastructure**: Parallel execution, task queue, HTTP API, cron scheduling, conditional stage routing, cross-backend dispatch.
+**Phase 3 — Remote + Async**: HTTP API, daemon mode, set-and-forget execution, remote task submission, result retrieval, notifications.
+
+**Phase 4 — Infrastructure**: Parallel execution, task queue, cron scheduling, conditional stage routing, cross-backend dispatch.
+
+**Phase 5 — Dashboard**: Web UI for following ravens across backends.
 
 ---
 

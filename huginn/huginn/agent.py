@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from .ollama_client import CompletionResult, complete, get_client
+from .tools import ToolContext, execute_tool_call, get_tool_definitions
+
+MAX_TOOL_ROUNDS = 20
 
 
 @dataclass
@@ -28,6 +31,8 @@ class AgentContext:
     output_dir: Path
     files_dir: Path | None  # Reference files (read-only)
     verification_rules: list[str]
+    tools: list[str] = field(default_factory=list)
+    backend_config: dict = field(default_factory=dict)
     timeout_minutes: int = 60
 
     # State tracking
@@ -52,7 +57,7 @@ class AgentResult:
 def run_agent(ctx: AgentContext) -> AgentResult:
     """Run the agent loop for a single pipeline stage."""
     start_time = time.time()
-    client = get_client(ctx.backend_url)
+    client = get_client(ctx.backend_url, ctx.backend_config or None)
 
     # Check for checkpoint (resume support)
     checkpoint = _load_checkpoint(ctx.output_dir)
@@ -67,6 +72,17 @@ def run_agent(ctx: AgentContext) -> AgentResult:
 
     # Build the initial user message
     user_message = _build_user_message(input_content, files_content, ctx)
+
+    # Set up tool calling if tools are declared
+    tool_ctx = None
+    tool_defs = None
+    if ctx.tools:
+        tool_ctx = ToolContext(
+            input_dir=ctx.input_dir,
+            files_dir=ctx.files_dir,
+            output_dir=ctx.output_dir,
+        )
+        tool_defs = get_tool_definitions(ctx.tools) or None
 
     verification_passed = None
     last_output = ""
@@ -87,29 +103,24 @@ def run_agent(ctx: AgentContext) -> AgentResult:
 
         ctx.iterations += 1
 
-        # THINK: Call the model
-        result = complete(
-            client=client,
-            model=ctx.model,
-            system_prompt=ctx.skill_prompt,
-            user_message=user_message,
-            temperature=ctx.temperature,
-        )
-
-        if not result.success:
-            # Retry logic: try up to 3 times on failure
-            retries = 0
-            while not result.success and retries < 3:
-                retries += 1
-                time.sleep(2 ** retries)  # Exponential backoff
-                result = complete(
-                    client=client,
-                    model=ctx.model,
-                    system_prompt=ctx.skill_prompt,
-                    user_message=user_message,
-                    temperature=ctx.temperature,
+        # THINK + ACT: Call the model, possibly with tool calling
+        if tool_defs and tool_ctx:
+            last_output, error = _run_tool_loop(
+                client, ctx, tool_ctx, tool_defs, user_message, start_time
+            )
+            if error:
+                return AgentResult(
+                    success=False,
+                    output_files=_list_output_files(ctx.output_dir),
+                    iterations=ctx.iterations,
+                    total_tokens=ctx.total_tokens,
+                    duration_seconds=round(time.time() - start_time, 2),
+                    verification_passed=None,
+                    error=error,
                 )
-
+        else:
+            # No tools — single-shot completion (original behavior)
+            result = _complete_with_retries(client, ctx, user_message)
             if not result.success:
                 return AgentResult(
                     success=False,
@@ -120,18 +131,17 @@ def run_agent(ctx: AgentContext) -> AgentResult:
                     verification_passed=None,
                     error=f"Model call failed after retries: {result.error}",
                 )
+            ctx.total_tokens += result.tokens_used
+            last_output = result.content
 
-        ctx.total_tokens += result.tokens_used
-        last_output = result.content
-
-        # ACT: Write the output
+        # Write the final text output
         _write_output(ctx.output_dir, last_output, ctx)
 
         # Record in history
         ctx.history.append({
             "iteration": ctx.iterations,
-            "tokens": result.tokens_used,
-            "seconds": result.duration_seconds,
+            "tokens": ctx.total_tokens,
+            "seconds": round(time.time() - start_time, 2),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "output_preview": last_output[:200],
         })
@@ -166,6 +176,104 @@ def run_agent(ctx: AgentContext) -> AgentResult:
         duration_seconds=round(elapsed, 2),
         verification_passed=verification_passed,
     )
+
+
+def _complete_with_retries(
+    client: Any,
+    ctx: AgentContext,
+    user_message: str,
+    tools: list[dict] | None = None,
+    messages: list[dict] | None = None,
+) -> CompletionResult:
+    """Call complete() with up to 3 retries on failure."""
+    result = complete(
+        client=client,
+        model=ctx.model,
+        system_prompt=ctx.skill_prompt,
+        user_message=user_message,
+        temperature=ctx.temperature,
+        tools=tools,
+        messages=messages,
+    )
+
+    if not result.success:
+        retries = 0
+        while not result.success and retries < 3:
+            retries += 1
+            time.sleep(2 ** retries)
+            result = complete(
+                client=client,
+                model=ctx.model,
+                system_prompt=ctx.skill_prompt,
+                user_message=user_message,
+                temperature=ctx.temperature,
+                tools=tools,
+                messages=messages,
+            )
+
+    return result
+
+
+def _run_tool_loop(
+    client: Any,
+    ctx: AgentContext,
+    tool_ctx: ToolContext,
+    tool_defs: list[dict],
+    user_message: str,
+    start_time: float,
+) -> tuple[str, str | None]:
+    """Run multi-turn tool-calling loop. Returns (output_text, error_or_none)."""
+    conversation: list[dict] = [
+        {"role": "system", "content": ctx.skill_prompt},
+        {"role": "user", "content": user_message},
+    ]
+
+    for _round in range(MAX_TOOL_ROUNDS):
+        # Check timeout mid-loop
+        if time.time() - start_time > ctx.timeout_minutes * 60:
+            return "", f"Timed out after {ctx.timeout_minutes} minutes"
+
+        result = _complete_with_retries(
+            client, ctx, user_message, tools=tool_defs, messages=conversation
+        )
+
+        if not result.success:
+            return "", f"Model call failed after retries: {result.error}"
+
+        ctx.total_tokens += result.tokens_used
+
+        # Build assistant message for conversation history
+        assistant_msg: dict[str, Any] = {"role": "assistant"}
+        if result.content:
+            assistant_msg["content"] = result.content
+        if result.tool_calls:
+            assistant_msg["tool_calls"] = result.tool_calls
+            if not result.content:
+                assistant_msg["content"] = None
+        else:
+            assistant_msg["content"] = result.content
+        conversation.append(assistant_msg)
+
+        # If no tool calls, we have the final output
+        if not result.tool_calls:
+            return result.content, None
+
+        # Execute each tool call and append results
+        for tc in result.tool_calls:
+            try:
+                args = json.loads(tc["function"]["arguments"])
+            except (json.JSONDecodeError, KeyError):
+                args = {}
+
+            tool_result = execute_tool_call(tc["function"]["name"], args, tool_ctx)
+            conversation.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": tool_result,
+            })
+
+    # Hit max tool rounds — use whatever content we have
+    return result.content or "[Max tool rounds reached without final response]", None
 
 
 def _read_directory(dir_path: Path) -> str:
