@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -114,8 +115,13 @@ def status(task_id: str):
     backends_used = sorted(set(s["backend"] for s in stages if s["backend"])) if stages else []
     backend_str = ", ".join(backends_used) if backends_used else "-"
 
+    # F099 — Determine execution mode (background vs local/foreground)
+    mode = _get_task_mode(huginn_home, task)
+    mode_color = "cyan" if mode == "background" else "blue"
+
     console.print(f"\n[bold]Task {task_id}[/bold] — [{status_color}]{task['status']}[/{status_color}]")
     console.print(f"  Pipeline: {task['pipeline_name']}")
+    console.print(f"  Mode:     [{mode_color}]{mode}[/{mode_color}]")
     console.print(f"  Backend:  {backend_str}")
     console.print(f"  Input:    {task['input_path']}")
     if resumable:
@@ -229,18 +235,54 @@ def list_skills_cmd():
     console.print(table)
 
 
+def _get_task_mode(huginn_home: Path, task: dict) -> str:
+    """Return 'background' or 'local' for the given task record.
+
+    Detection order:
+      1. PID file present → background (written by background.py)
+      2. metadata JSON contains {"background": true} → background
+      3. Otherwise → local (foreground)
+    """
+    pid_path = huginn_home / "tasks" / task["id"] / "pid"
+    if pid_path.exists():
+        return "background"
+    raw_meta = task.get("metadata")
+    if raw_meta:
+        try:
+            meta = json.loads(raw_meta)
+            if meta.get("background"):
+                return "background"
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return "local"
+
+
 @main.command()
 @click.option("--limit", "-n", default=20, help="Number of tasks to show")
 @click.option("--status", "-s", "filter_status", default=None, help="Filter by status")
-def tasks(limit: int, filter_status: str | None):
-    """List recent tasks."""
+@click.option(
+    "--mode",
+    "-m",
+    "filter_mode",
+    default=None,
+    type=click.Choice(["local", "background"], case_sensitive=False),
+    help="Filter by execution mode: local or background",
+)
+def tasks(limit: int, filter_status: str | None, filter_mode: str | None):
+    """List recent tasks.
+
+    Use --mode to filter by execution mode: local (foreground) or background.
+    """
     huginn_home = get_huginn_home()
     db = HuginnDB(huginn_home / "huginn.db")
 
-    task_list = db.list_tasks(status=filter_status, limit=limit)
+    # Fetch extra rows when mode-filtering so we can trim to --limit after filter
+    fetch_limit = limit if not filter_mode else limit * 4
+    task_list = db.list_tasks(status=filter_status, limit=fetch_limit)
 
     if not task_list:
         console.print("[dim]No tasks found.[/dim]")
+        db.close()
         return
 
     # Detect stale "running" tasks whose process is no longer alive
@@ -251,17 +293,33 @@ def tasks(limit: int, filter_status: str | None):
                 stale_ids.append(t["id"])
 
     # Update stale tasks in DB
-    for task_id in stale_ids:
-        db.update_task(task_id, status="interrupted")
+    for stale_id in stale_ids:
+        db.update_task(stale_id, status="interrupted")
 
     # Re-fetch if we changed any statuses
     if stale_ids:
-        task_list = db.list_tasks(status=filter_status, limit=limit)
+        task_list = db.list_tasks(status=filter_status, limit=fetch_limit)
 
-    table = Table(title="Recent Tasks")
+    # Apply mode filter (local vs background)
+    if filter_mode:
+        task_list = [t for t in task_list if _get_task_mode(huginn_home, t) == filter_mode.lower()]
+        task_list = task_list[:limit]
+
+    if not task_list:
+        suffix = f" with mode={filter_mode}" if filter_mode else ""
+        console.print(f"[dim]No tasks found{suffix}.[/dim]")
+        db.close()
+        return
+
+    title = "Recent Tasks"
+    if filter_mode:
+        title += f" (mode: {filter_mode})"
+
+    table = Table(title=title)
     table.add_column("ID", width=10)
     table.add_column("Pipeline", min_width=15)
     table.add_column("Backend", min_width=8)
+    table.add_column("Mode", min_width=12)
     table.add_column("Status", min_width=10)
     table.add_column("Stages")
     table.add_column("Queued", min_width=20)
@@ -278,13 +336,16 @@ def tasks(limit: int, filter_status: str | None):
 
         stage_str = f"{t['current_stage']}/{t['total_stages']}" if t["total_stages"] else "-"
         queued = t["queued_at"][:19] if t["queued_at"] else "-"
-        backends = db.get_task_backends(t["id"])
-        backend_str = ", ".join(backends) if backends else "-"
+        backends_used = db.get_task_backends(t["id"])
+        backend_str = ", ".join(backends_used) if backends_used else "-"
+        mode = _get_task_mode(huginn_home, t)
+        mode_color = "cyan" if mode == "background" else "blue"
 
         table.add_row(
             t["id"],
             t["pipeline_name"],
             backend_str,
+            f"[{mode_color}]{mode}[/{mode_color}]",
             f"[{s_color}]{t['status']}[/{s_color}]",
             stage_str,
             queued,
@@ -477,6 +538,268 @@ def logs(task_id: str, follow: bool, lines: int):
         output_lines = text.splitlines()
         for line in output_lines[-lines:]:
             console.print(line)
+
+
+# ---------------------------------------------------------------------------
+# F065 — backends command
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--check", is_flag=True, help="Probe each backend to verify reachability")
+def backends(check: bool):
+    """List all configured backends with type, URL, and reachability."""
+    from .ollama_client import check_backend_reachable
+
+    config = load_config()
+    backend_map = config.get("backends", {})
+    default_name = config.get("default_backend", "")
+
+    if not backend_map:
+        console.print("[dim]No backends configured. Edit ~/.huginn/config.yaml[/dim]")
+        return
+
+    table = Table(title="Configured Backends")
+    table.add_column("Name", min_width=12)
+    table.add_column("Type", min_width=10)
+    table.add_column("URL", min_width=30)
+    if check:
+        table.add_column("Reachable", min_width=10)
+    table.add_column("Default", min_width=8)
+
+    for name, cfg in backend_map.items():
+        backend_type = cfg.get("type", "ollama")
+        url = cfg.get("url", "-")
+        is_default = "yes" if name == default_name else ""
+
+        row = [name, backend_type, url]
+
+        if check:
+            full_cfg = dict(cfg)
+            full_cfg.setdefault("type", "ollama")
+            full_cfg["name"] = name
+            reachable = check_backend_reachable(url, full_cfg)
+            reach_str = "[green]yes[/green]" if reachable else "[red]no[/red]"
+            row.append(reach_str)
+
+        row.append("[green]yes[/green]" if is_default else "")
+        table.add_row(*row)
+
+    console.print(table)
+    if not check:
+        console.print("[dim]Pass --check to probe backend reachability[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# F088 — cancel command (alias for stop)
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.argument("task_id")
+def cancel(task_id: str):
+    """Cancel a running task. Alias for 'stop'."""
+    import signal
+    from datetime import datetime, timezone
+
+    huginn_home = get_huginn_home()
+    db = HuginnDB(huginn_home / "huginn.db")
+
+    task = db.get_task(task_id)
+    if not task:
+        console.print(f"[red]Task '{task_id}' not found[/red]")
+        sys.exit(1)
+
+    if task["status"] in ("complete", "failed", "cancelled"):
+        console.print(f"[yellow]Task '{task_id}' is already {task['status']}[/yellow]")
+        db.close()
+        return
+
+    pid_path = huginn_home / "tasks" / task_id / "pid"
+    if pid_path.exists():
+        try:
+            pid = int(pid_path.read_text().strip())
+            os.kill(pid, signal.SIGTERM)
+            console.print(f"Sent SIGTERM to PID {pid}")
+        except ProcessLookupError:
+            console.print(f"[dim]Process already dead[/dim]")
+        except PermissionError:
+            console.print(f"[red]Cannot kill process — permission denied[/red]")
+            db.close()
+            sys.exit(1)
+        except ValueError:
+            console.print(f"[red]Invalid PID file[/red]")
+    else:
+        console.print("[dim]No PID file — task was run in foreground[/dim]")
+
+    db.update_task(
+        task_id,
+        status="cancelled",
+        error_message="Stopped by user via huginn cancel",
+        completed_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    stages = db.get_stages(task_id)
+    for s in stages:
+        if s["status"] == "running":
+            db.update_stage(
+                s["id"],
+                status="cancelled",
+                error_message="Parent task cancelled by user",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+    db.close()
+    console.print(f"[green]Task {task_id} cancelled[/green]")
+    console.print(f"  Partial output preserved in: {huginn_home / 'tasks' / task_id}")
+    if task["current_stage"] and task["current_stage"] > 0:
+        console.print(f"  Completed stages: {task['current_stage']}/{task['total_stages']}")
+        console.print(f"  [dim]Resume later with: huginn resume {task_id}[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# F090 — batch command
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.argument("pipeline_name")
+@click.option("--input-dir", "-d", required=True, help="Directory of input files to process")
+@click.option("--backend", "-b", default=None, help="Override backend for all tasks")
+def batch(pipeline_name: str, input_dir: str, backend: str | None):
+    """Submit multiple inputs to the same pipeline as background tasks."""
+    from .background import launch_background
+
+    input_p = Path(input_dir)
+    if not input_p.exists() or not input_p.is_dir():
+        console.print(f"[red]Input directory not found: {input_dir}[/red]")
+        sys.exit(1)
+
+    input_files = sorted(f for f in input_p.iterdir() if f.is_file())
+    if not input_files:
+        console.print(f"[yellow]No files found in: {input_dir}[/yellow]")
+        return
+
+    launched = []
+    failed = []
+
+    for f in input_files:
+        try:
+            result = launch_background(pipeline_name, f, backend)
+            launched.append({"file": f.name, "task_id": result["task_id"], "pid": result["pid"]})
+        except Exception as e:
+            failed.append({"file": f.name, "error": str(e)})
+
+    if launched:
+        table = Table(title=f"Batch: {pipeline_name} — {len(launched)} task(s) launched")
+        table.add_column("File", min_width=25)
+        table.add_column("Task ID", width=10)
+        table.add_column("PID", justify="right")
+
+        for item in launched:
+            table.add_row(item["file"], item["task_id"], str(item["pid"]))
+
+        console.print(table)
+        console.print(f"\n[green]{len(launched)} task(s) running in background[/green]")
+        console.print("  Check status: huginn tasks")
+        console.print("  View a task:  huginn status <task_id>")
+
+    if failed:
+        console.print(f"\n[red]{len(failed)} file(s) failed to launch:[/red]")
+        for item in failed:
+            console.print(f"  {item['file']}: {item['error']}")
+
+
+# ---------------------------------------------------------------------------
+# F094 + F095 — output command (with --download flag)
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.argument("task_id")
+@click.option(
+    "--download",
+    "-D",
+    "download_path",
+    default=None,
+    is_flag=False,
+    flag_value=".",
+    help="Copy output files to current directory or specified path",
+)
+def output(task_id: str, download_path: str | None):
+    """Retrieve and display the final output from a completed task.
+
+    Pass --download to copy output files to the current directory,
+    or --download /some/path to save to a specific location.
+    """
+    huginn_home = get_huginn_home()
+    db = HuginnDB(huginn_home / "huginn.db")
+
+    task = db.get_task(task_id)
+    if not task:
+        console.print(f"[red]Task '{task_id}' not found[/red]")
+        db.close()
+        sys.exit(1)
+
+    db.close()
+
+    if task["status"] != "complete":
+        status_color = {
+            "running": "yellow",
+            "failed": "red",
+            "queued": "blue",
+            "cancelled": "dim",
+            "interrupted": "magenta",
+        }.get(task["status"], "white")
+        console.print(
+            f"[{status_color}]Task '{task_id}' is not complete "
+            f"(status: {task['status']})[/{status_color}]"
+        )
+        if task["status"] == "running":
+            console.print(f"  Wait for it to finish, then run: huginn output {task_id}")
+        elif task["status"] in ("interrupted", "failed"):
+            console.print(f"  Resume with: huginn resume {task_id}")
+        return
+
+    output_dir = huginn_home / "tasks" / task_id / "output"
+    if not output_dir.exists():
+        console.print(f"[red]Output directory not found: {output_dir}[/red]")
+        sys.exit(1)
+
+    output_files = sorted(f for f in output_dir.iterdir() if f.is_file())
+    if not output_files:
+        console.print(f"[yellow]No output files in: {output_dir}[/yellow]")
+        return
+
+    if download_path is not None:
+        dest = Path(download_path).resolve()
+        dest.mkdir(parents=True, exist_ok=True)
+        copied = []
+        for f in output_files:
+            target = dest / f.name
+            shutil.copy2(f, target)
+            copied.append(str(target))
+        console.print(f"[green]Copied {len(copied)} file(s) to {dest}:[/green]")
+        for path in copied:
+            console.print(f"  {path}")
+        return
+
+    # Print the main output file to stdout
+    main_file = output_files[0]
+    console.print(f"[bold]Output:[/bold] {main_file.name}  [dim]({main_file.stat().st_size:,} bytes)[/dim]")
+    console.print()
+
+    try:
+        content = main_file.read_text()
+        console.print(content)
+    except UnicodeDecodeError:
+        console.print(f"[dim](Binary file — use --download to save locally)[/dim]")
+
+    if len(output_files) > 1:
+        console.print(f"\n[dim]{len(output_files) - 1} additional file(s) in {output_dir}[/dim]")
+        for f in output_files[1:]:
+            console.print(f"  [dim]{f.name} ({f.stat().st_size:,} bytes)[/dim]")
+        console.print(f"[dim]Use --download to copy all output files locally.[/dim]")
 
 
 if __name__ == "__main__":
