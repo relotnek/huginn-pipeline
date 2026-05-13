@@ -134,8 +134,18 @@ def run_agent(ctx: AgentContext) -> AgentResult:
             ctx.total_tokens += result.tokens_used
             last_output = result.content
 
-        # Write the final text output
-        _write_output(ctx.output_dir, last_output, ctx)
+        # Write the final text output — but only if the model didn't already
+        # write files via file_write during the tool loop. If tool-written files
+        # exist, those ARE the stage output; don't overwrite with the model's
+        # summary/checklist text response.
+        tool_written_files = _list_output_files(ctx.output_dir)
+        if not tool_written_files:
+            _write_output(ctx.output_dir, last_output, ctx)
+        elif last_output and last_output.strip():
+            # Tool wrote files but model also had a text response — save it
+            # as a separate notes file so it's not lost but doesn't overwrite
+            notes_path = ctx.output_dir / "agent-notes.md"
+            notes_path.write_text(last_output, encoding="utf-8")
 
         # Record in history
         ctx.history.append({

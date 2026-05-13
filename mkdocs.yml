@@ -29,7 +29,7 @@ theme:
     - search.suggest
     - search.highlight
     - toc.follow
-  logo: images/huginlogosimple.png
+  logo: images/huginnlogotransparentdark.png
   favicon: images/huginlogosimple.png
   icon:
     repo: fontawesome/brands/github

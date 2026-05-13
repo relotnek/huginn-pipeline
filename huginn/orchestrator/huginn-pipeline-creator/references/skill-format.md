@@ -62,6 +62,27 @@ Supported check types:
 - **Banned phrases**: "No banned phrases from style guide"
 - **Content containment**: "Output must contain 'security'"
 
+## Output Contract — How Stage Output Works
+
+**The model's text response becomes the stage output file (`output.md` or `output.json`).**
+
+This is the critical rule for skill authors:
+- If the model returns markdown text → saved as `output.md`
+- If the model returns JSON → saved as `output.json`
+- If the model uses `file_write` to create files → those files ARE the output, the text response is saved as `agent-notes.md`
+- If the model uses `file_write` AND returns a text response → the tool-written files take priority
+
+**For assembly/report stages** (stages that consolidate prior outputs into a final deliverable):
+- The skill MUST instruct the model to output the complete report as its text response
+- The skill MUST say: "Output the COMPLETE document as your text response. Do NOT use file_write."
+- The skill MUST say: "Do NOT output a summary or checklist — output the full content"
+- Without these instructions, models will often generate a verification checklist instead of the actual deliverable
+
+**For stages that use file_write** (e.g., writing multiple output files):
+- Use `file_write` when the stage needs to produce multiple named files
+- Use `file_read` for reading inputs, `file_write` for producing structured outputs
+- The model's text response after tool calls should describe what was written (this becomes `agent-notes.md`)
+
 ## What the Pipeline Creator Needs to Know
 
 When incorporating a skill into a pipeline:
@@ -71,6 +92,7 @@ When incorporating a skill into a pipeline:
 3. The skill's `verification` rules are merged with any `verification` rules in the manifest stage
 4. The skill's `tools`, `constraints`, and `max_iterations` are used by the agent loop
 5. The skill body (system prompt) is what actually gets sent to the model
+6. **Assembly/report stages MUST explicitly instruct the model to output content as text, not use file_write** — otherwise models will output a checklist instead of the deliverable
 
 ## Validating a Skill File
 
