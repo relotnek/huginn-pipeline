@@ -31,8 +31,11 @@ Stages can use tools during execution. The model generates tool calls (via OpenA
 Available tools:
 - **file_read** — read files from the input or reference files directory
 - **file_write** — write files to the output directory
+- **web_search** — search the web via DuckDuckGo (requires `network: true`)
+- **web_fetch** — fetch and extract text content from URLs (requires `network: true`)
+- **shell** — execute shell commands (requires `shell: true`)
 
-Tools run where Huginn runs (local), not where the model runs (backend). Path restrictions enforce that agents can only read from declared inputs and write to their output directory.
+Tools run where Huginn runs (local), not where the model runs (backend). Path restrictions enforce that agents can only read from declared inputs and write to their output directory. Network and shell tools are blocked by default and must be explicitly enabled in skill constraints.
 
 ## Prerequisites
 
@@ -114,8 +117,17 @@ huginn run post-generator --input ./raw-notes.md --backend openrouter
 # Check task status
 huginn status <task-id>
 
+# View task output
+huginn output <task-id>
+
 # Follow logs for a background task
 huginn logs <task-id> --follow
+
+# Stop a running task
+huginn stop <task-id>
+
+# Resume an interrupted task
+huginn resume <task-id>
 
 # List available pipelines
 huginn pipelines

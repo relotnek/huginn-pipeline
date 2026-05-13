@@ -1,0 +1,43 @@
+name: content-classifier
+description: Classify written content by type, topic, and audience with confidence scores and suggested tags
+version: "1.0"
+
+defaults:
+  backend: i3
+  timeout_minutes: 30
+
+stages:
+  - name: extract
+    skill: skills/01-extract.md
+    model: qwen2.5:7b
+    input: $pipeline_input
+    output: metadata.json
+    tools: [file_read]
+    constraints:
+      network: false
+      shell: false
+
+  - name: classify
+    skill: skills/02-classify.md
+    model: qwen2.5:7b
+    input: metadata.json
+    output: classification.json
+    tools: [file_read]
+    constraints:
+      network: false
+      shell: false
+
+  - name: report
+    skill: skills/03-report.md
+    model: qwen2.5:7b
+    input:
+      - metadata.json
+      - classification.json
+    output: classification-report.md
+    tools: [file_read, file_write]
+    constraints:
+      network: false
+      shell: false
+
+on_complete:
+  output_file: classification-report.md

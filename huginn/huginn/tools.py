@@ -7,11 +7,13 @@ write to their output directory.
 
 import html.parser
 import json
+import re
 import subprocess
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -143,6 +145,57 @@ TOOL_DEFINITIONS: dict[str, dict] = {
                     },
                 },
                 "required": ["command"],
+            },
+        },
+    },
+    "git": {
+        "type": "function",
+        "function": {
+            "name": "git",
+            "description": (
+                "Run a read-only git command in a repository. Supports: log, diff, show, "
+                "status, blame, shortlog, rev-parse, branch --list, tag --list. "
+                "Write operations (commit, push, checkout, reset) are blocked. "
+                "Requires shell: true in skill constraints."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Git subcommand and arguments (e.g., 'log --oneline -20', 'diff HEAD~1', 'blame src/main.py')",
+                    },
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the git repository (default: current working directory)",
+                    },
+                },
+                "required": ["command"],
+            },
+        },
+    },
+    "json_parse": {
+        "type": "function",
+        "function": {
+            "name": "json_parse",
+            "description": (
+                "Parse a JSON string and extract data using a dot-notation path. "
+                "Useful for extracting fields from JSON files or API responses. "
+                "Returns the extracted value as a formatted string."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "json_string": {
+                        "type": "string",
+                        "description": "The JSON string to parse",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Dot-notation path to extract (e.g., 'data.items', 'results[0].name', '.' for root). Supports array indexing with [N].",
+                    },
+                },
+                "required": ["json_string"],
             },
         },
     },
@@ -347,6 +400,246 @@ def shell(command: str, timeout: int = 30) -> str:
         return f"Error running command: {e}"
 
 
+# ---------------------------------------------------------------------------
+# Git tool — read-only git operations
+# ---------------------------------------------------------------------------
+
+# Git subcommands that are safe (read-only)
+_GIT_ALLOWED_SUBCOMMANDS = {
+    "log", "diff", "show", "status", "blame", "shortlog",
+    "rev-parse", "branch", "tag", "ls-files", "ls-tree",
+    "cat-file", "describe", "name-rev", "rev-list",
+}
+
+# Git subcommands that mutate state — always blocked
+_GIT_BLOCKED_SUBCOMMANDS = {
+    "commit", "push", "pull", "fetch", "merge", "rebase", "reset",
+    "checkout", "switch", "restore", "cherry-pick", "revert",
+    "clean", "rm", "mv", "init", "clone", "remote", "stash",
+    "bisect", "gc", "prune", "reflog", "filter-branch",
+}
+
+
+def git(command: str, repo_path: str | None = None) -> str:
+    """Run a read-only git command and return output."""
+    if not command or not command.strip():
+        return "Error: git command must not be empty"
+
+    parts = command.strip().split()
+    subcommand = parts[0].lower()
+
+    # Check subcommand allowlist
+    if subcommand in _GIT_BLOCKED_SUBCOMMANDS:
+        return f"Error: git {subcommand} is blocked — only read-only git operations are allowed"
+
+    if subcommand not in _GIT_ALLOWED_SUBCOMMANDS:
+        return (
+            f"Error: git {subcommand} is not in the allowed list. "
+            f"Allowed: {', '.join(sorted(_GIT_ALLOWED_SUBCOMMANDS))}"
+        )
+
+    # Block --exec and -c flags that could run arbitrary commands
+    for arg in parts[1:]:
+        if arg.startswith("--exec") or arg == "-c":
+            return f"Error: flag '{arg}' is blocked for security"
+
+    full_cmd = ["git"]
+    if repo_path:
+        full_cmd.extend(["-C", repo_path])
+    full_cmd.extend(parts)
+
+    try:
+        proc = subprocess.run(
+            full_cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        output = proc.stdout
+        if proc.stderr:
+            output += f"\n[stderr]\n{proc.stderr}"
+        output = output.strip()
+        if not output:
+            return f"(git {subcommand} returned no output, exit code {proc.returncode})"
+        # Truncate large outputs
+        if len(output) > 15000:
+            output = output[:15000] + "\n\n[truncated — output exceeded 15000 chars]"
+        return output
+    except subprocess.TimeoutExpired:
+        return "Error: git command timed out after 30 seconds"
+    except FileNotFoundError:
+        return "Error: git is not installed or not in PATH"
+    except Exception as e:
+        return f"Error running git: {e}"
+
+
+# ---------------------------------------------------------------------------
+# JSON parse tool — extract data from JSON strings
+# ---------------------------------------------------------------------------
+
+def json_parse(json_string: str, path: str | None = None) -> str:
+    """Parse JSON and optionally extract a value at a dot-notation path."""
+    if not json_string or not json_string.strip():
+        return "Error: json_string must not be empty"
+
+    try:
+        data = json.loads(json_string.strip())
+    except json.JSONDecodeError as e:
+        return f"Error: invalid JSON — {e}"
+
+    if not path or path.strip() == "." or path.strip() == "":
+        # Return the whole thing, formatted
+        return json.dumps(data, indent=2, ensure_ascii=False)
+
+    # Navigate the path: supports dot notation and array indexing
+    # e.g., "data.items[0].name" → data → items → [0] → name
+    current = data
+    segments = _parse_json_path(path.strip())
+
+    for segment in segments:
+        try:
+            if isinstance(segment, int):
+                current = current[segment]
+            elif isinstance(current, dict):
+                if segment not in current:
+                    available = ", ".join(current.keys()) if isinstance(current, dict) else str(type(current))
+                    return f"Error: key '{segment}' not found. Available keys: {available}"
+                current = current[segment]
+            elif isinstance(current, list):
+                return f"Error: expected dict at '{segment}' but got list with {len(current)} items"
+            else:
+                return f"Error: cannot navigate into {type(current).__name__} at '{segment}'"
+        except (IndexError, KeyError, TypeError) as e:
+            return f"Error: path navigation failed at '{segment}' — {e}"
+
+    if isinstance(current, (dict, list)):
+        return json.dumps(current, indent=2, ensure_ascii=False)
+    return str(current)
+
+
+def _parse_json_path(path: str) -> list[str | int]:
+    """Parse a dot-notation path like 'data.items[0].name' into segments."""
+    segments: list[str | int] = []
+    for part in path.split("."):
+        if not part:
+            continue
+        # Check for array indexing: items[0]
+        match = re.match(r'^(\w+)\[(\d+)\]$', part)
+        if match:
+            segments.append(match.group(1))
+            segments.append(int(match.group(2)))
+        elif re.match(r'^\[\d+\]$', part):
+            segments.append(int(part[1:-1]))
+        else:
+            segments.append(part)
+    return segments
+
+
+# ---------------------------------------------------------------------------
+# Skill invoke tool — run a skill as a sub-agent
+# ---------------------------------------------------------------------------
+
+def skill_invoke(
+    skill_name: str,
+    input_text: str,
+    ctx: ToolContext,
+    backend_url: str | None = None,
+    backend_config: dict | None = None,
+) -> str:
+    """Invoke a global skill as a sub-agent and return its output.
+
+    Finds the skill in ~/.huginn/skills/, runs one iteration of the agent
+    loop with the provided input_text, and returns the model's response.
+    This is a lightweight sub-raven — no stage directory, no DB tracking.
+    """
+    from .config import get_huginn_home, load_config, get_backend_config, resolve_model_name
+    from .ollama_client import complete, get_client
+
+    if not skill_name or not skill_name.strip():
+        return "Error: skill_name must not be empty"
+
+    if not input_text or not input_text.strip():
+        return "Error: input_text must not be empty"
+
+    # Find the skill file
+    huginn_home = get_huginn_home()
+    skill_path = huginn_home / "skills" / f"{skill_name.strip()}.md"
+
+    if not skill_path.exists():
+        # Try without .md extension already in name
+        skill_path = huginn_home / "skills" / skill_name.strip()
+        if not skill_path.exists():
+            available = [f.stem for f in (huginn_home / "skills").glob("*.md")]
+            avail_str = ", ".join(available) if available else "(none)"
+            return f"Error: skill '{skill_name}' not found in ~/.huginn/skills/. Available: {avail_str}"
+
+    try:
+        from .skill import parse_skill
+        skill = parse_skill(skill_path)
+    except Exception as e:
+        return f"Error parsing skill '{skill_name}': {e}"
+
+    # Resolve backend and model
+    config = load_config()
+    if backend_config is None:
+        try:
+            backend_name = skill.backend or config["default_backend"]
+            backend_config = get_backend_config(config, backend_name)
+        except Exception as e:
+            return f"Error resolving backend: {e}"
+
+    resolved_model = resolve_model_name(skill.model, backend_config)
+    b_url = backend_url or backend_config.get("url", "")
+
+    try:
+        client = get_client(b_url, backend_config)
+    except Exception as e:
+        return f"Error creating client for skill backend: {e}"
+
+    # Single-shot completion — no tool loop for sub-skills (keep it simple)
+    result = complete(
+        client=client,
+        model=resolved_model,
+        system_prompt=skill.system_prompt,
+        user_message=input_text.strip(),
+        temperature=skill.temperature,
+    )
+
+    if not result.success:
+        return f"Error invoking skill '{skill_name}': {result.error}"
+
+    return result.content
+
+
+# Add skill_invoke to TOOL_DEFINITIONS
+TOOL_DEFINITIONS["skill_invoke"] = {
+    "type": "function",
+    "function": {
+        "name": "skill_invoke",
+        "description": (
+            "Invoke a global Huginn skill as a sub-agent. Sends input text to the "
+            "skill's model with the skill's system prompt and returns the response. "
+            "Skills are located in ~/.huginn/skills/. Use this to delegate subtasks "
+            "to specialized skills without creating a full pipeline stage."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "skill_name": {
+                    "type": "string",
+                    "description": "Name of the skill file (without .md extension) in ~/.huginn/skills/",
+                },
+                "input_text": {
+                    "type": "string",
+                    "description": "The input text to send to the skill",
+                },
+            },
+            "required": ["skill_name", "input_text"],
+        },
+    },
+}
+
+
 def execute_tool_call(name: str, arguments: dict, ctx: ToolContext) -> str:
     """Dispatch a tool call by name. Returns result string or error string.
 
@@ -374,6 +667,22 @@ def execute_tool_call(name: str, arguments: dict, ctx: ToolContext) -> str:
             return shell(
                 arguments.get("command", ""),
                 arguments.get("timeout", 30),
+            )
+        elif name == "git":
+            return git(
+                arguments.get("command", ""),
+                arguments.get("repo_path"),
+            )
+        elif name == "json_parse":
+            return json_parse(
+                arguments.get("json_string", ""),
+                arguments.get("path"),
+            )
+        elif name == "skill_invoke":
+            return skill_invoke(
+                arguments.get("skill_name", ""),
+                arguments.get("input_text", ""),
+                ctx,
             )
         else:
             return f"Error: Unknown tool '{name}'"

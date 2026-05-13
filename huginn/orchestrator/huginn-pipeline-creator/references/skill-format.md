@@ -47,9 +47,9 @@ constraints:
 | backend | string | null (uses pipeline default) | Ollama backend name |
 | temperature | float | 0.7 | Model temperature |
 | max_iterations | int | 10 | Max agent loop iterations |
-| tools | list | [file_read] | Available tools |
-| constraints.network | bool | false | Internet access |
-| constraints.shell | bool | false | Shell command access |
+| tools | list | [file_read] | Available tools (see Tools section below) |
+| constraints.network | bool | false | Internet access — required for web_search, web_fetch, skill_invoke |
+| constraints.shell | bool | false | Shell command access — required for shell, git |
 | constraints.timeout_minutes | int | 60 | Stage timeout |
 
 ## Verification Section
@@ -93,6 +93,43 @@ When incorporating a skill into a pipeline:
 4. The skill's `tools`, `constraints`, and `max_iterations` are used by the agent loop
 5. The skill body (system prompt) is what actually gets sent to the model
 6. **Assembly/report stages MUST explicitly instruct the model to output content as text, not use file_write** — otherwise models will output a checklist instead of the deliverable
+
+## Available Tools
+
+Skills declare which tools they need in the `tools` frontmatter field. The agent loop provides these tools to the model via OpenAI function-calling format.
+
+| Tool | Constraint | Description |
+|------|-----------|-------------|
+| `file_read` | (none) | Read files from input and reference files directories |
+| `file_write` | (none) | Write files to the output directory |
+| `json_parse` | (none) | Parse JSON strings and extract values via dot-notation path |
+| `web_search` | `network: true` | Search the web via DuckDuckGo |
+| `web_fetch` | `network: true` | Fetch and extract text content from URLs |
+| `skill_invoke` | `network: true` | Invoke a global skill from `~/.huginn/skills/` as a sub-agent |
+| `shell` | `shell: true` | Execute shell commands (dangerous commands blocked) |
+| `git` | `shell: true` | Read-only git operations (log, diff, show, blame, status) |
+
+### Example frontmatter with tools:
+
+```yaml
+---
+name: code-reviewer
+model: qwen3:8b
+tools: [file_read, git, json_parse]
+constraints:
+  shell: true       # required for git tool
+---
+```
+
+```yaml
+---
+name: web-researcher
+model: qwen3:8b
+tools: [file_read, web_search, web_fetch, skill_invoke]
+constraints:
+  network: true     # required for web and skill_invoke tools
+---
+```
 
 ## Validating a Skill File
 

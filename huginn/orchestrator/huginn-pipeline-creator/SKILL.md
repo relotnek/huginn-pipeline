@@ -143,6 +143,72 @@ Reference `references/available-models.md` for current model inventory, but the 
 
 Rule of thumb: use the smallest model that meets the quality bar for each stage. Classification doesn't need a 27B model. Prose generation in someone's voice does.
 
+## Critical: How Stage Output Works
+
+**The model's text response becomes the stage output file.** This is the most important thing to understand when writing skills:
+
+- Model returns markdown → saved as `output.md`
+- Model returns JSON → saved as `output.json`
+- Model uses `file_write` → those files ARE the output; text response saved as `agent-notes.md`
+
+**For assembly/report stages** (the final stage that consolidates prior outputs into a deliverable):
+- The skill MUST explicitly instruct the model: "Output the COMPLETE document as your text response. Do NOT use file_write."
+- The skill MUST say: "Do NOT output a summary or checklist — output the full content."
+- Without these instructions, models will generate a verification checklist instead of the actual report. This is the most common failure mode for final-stage skills.
+- Consider whether the model has enough context window for all inputs. If total input exceeds ~50KB, add a summarization stage before assembly.
+
+**For stages that use file_read/file_write:**
+- Use `file_read` to read from input directory (prior stage output) and reference files
+- Use `file_write` only when the stage needs to produce multiple named files
+- For single-output stages, just have the model output text — don't use file_write
+
+## Available Tools (8 total)
+
+Huginn provides 8 tools, each gated by skill constraints:
+
+| Tool | Constraint | Use When |
+|------|-----------|----------|
+| `file_read` | (none) | Always — reading input files and reference docs |
+| `file_write` | (none) | Stage produces multiple output files |
+| `json_parse` | (none) | Processing JSON from prior stages or APIs |
+| `web_search` | `network: true` | Research stages needing current information |
+| `web_fetch` | `network: true` | Reading web pages, API endpoints, documentation |
+| `skill_invoke` | `network: true` | Delegating subtasks to global skills in ~/.huginn/skills/ |
+| `shell` | `shell: true` | System commands, build tools, data processing |
+| `git` | `shell: true` | Code review, changelogs, commit analysis (read-only) |
+
+### Constraint rules:
+- `network: true` enables: web_search, web_fetch, skill_invoke
+- `shell: true` enables: shell, git
+- Tools not matching their constraint are blocked at runtime with a clear error
+
+### skill_invoke:
+Lets a stage call any skill from `~/.huginn/skills/` as a lightweight sub-agent (single-shot, no tool loop). Useful for classification, filtering, or analysis subtasks without adding a full pipeline stage.
+
+### git tool:
+Read-only only. Allowed: log, diff, show, status, blame, shortlog, ls-files, describe. Blocked: commit, push, checkout, reset, merge, clean, and all other write operations.
+
+### Example stage declarations:
+
+```yaml
+# Research stage
+- name: research
+  tools: [file_read, web_search, web_fetch, json_parse]
+  constraints:
+    network: true
+
+# Code analysis stage
+- name: analyze-code
+  tools: [file_read, git, json_parse, skill_invoke]
+  constraints:
+    shell: true
+    network: true
+
+# Simple text stage (no special constraints)
+- name: summarize
+  tools: [file_read, json_parse]
+```
+
 ## Critical Manifest Rules
 
 These are the most common mistakes — check every manifest against them:
@@ -155,6 +221,7 @@ These are the most common mistakes — check every manifest against them:
 6. Every `files:` entry must be relative to the pipeline directory (e.g., `files/voice-rules.md`)
 7. Constraints default to `network: false, shell: false` — only enable what's needed
 8. Model names must match exactly what Ollama reports (e.g., `qwen2.5:7b` not `qwen2.5-7b`)
+9. Assembly/report stages MUST instruct the model to output content as text, NOT use file_write
 
 ## Example Interaction
 

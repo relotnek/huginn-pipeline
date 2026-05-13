@@ -1,0 +1,45 @@
+name: code-reviewer
+description: Security-focused code review — inventory functions, analyze for vulnerabilities, report findings by severity
+version: "1.0"
+
+defaults:
+  backend: i3
+  timeout_minutes: 60
+
+stages:
+  - name: inventory
+    skill: skills/01-inventory.md
+    model: qwen2.5:7b
+    input: $pipeline_input
+    output: inventory.json
+    tools: [file_read]
+    constraints:
+      network: false
+      shell: false
+
+  - name: analyze
+    skill: skills/02-analyze.md
+    model: qwen2.5:7b
+    input:
+      - $pipeline_input
+      - inventory.json
+    output: findings.json
+    tools: [file_read]
+    constraints:
+      network: false
+      shell: false
+
+  - name: report
+    skill: skills/03-report.md
+    model: qwen2.5:7b
+    input:
+      - inventory.json
+      - findings.json
+    output: security-review.md
+    tools: [file_read, file_write]
+    constraints:
+      network: false
+      shell: false
+
+on_complete:
+  output_file: security-review.md

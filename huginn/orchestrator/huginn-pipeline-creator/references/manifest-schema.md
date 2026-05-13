@@ -96,10 +96,52 @@ The agent auto-detects JSON content and saves with `.json` extension, but explic
 
 ## Tools Reference
 
-| Tool | Description | When to Include |
-|------|-------------|----------------|
-| `file_read` | Read files from input and files directories | Always (default) |
-| `file_write` | Write files to output directory | Stages that produce output |
+Huginn provides 8 tools. Each tool is gated by skill constraints — tools requiring `network: true` or `shell: true` are blocked unless the skill explicitly enables them.
+
+| Tool | Constraint | Description | When to Include |
+|------|-----------|-------------|----------------|
+| `file_read` | (none) | Read files from input and files directories | Always (default) |
+| `file_write` | (none) | Write files to output directory | Stages that produce output files |
+| `json_parse` | (none) | Parse JSON and extract values via dot-notation path | Stages that process JSON from prior stages or APIs |
+| `web_search` | `network: true` | Search the web via DuckDuckGo | Research stages that need current information |
+| `web_fetch` | `network: true` | Fetch URL content with HTML stripping | Stages that need to read web pages or API endpoints |
+| `skill_invoke` | `network: true` | Invoke a global skill as a sub-agent | Stages that delegate subtasks to specialized skills |
+| `shell` | `shell: true` | Run shell commands (blocklist enforced) | Stages that need system commands, build tools |
+| `git` | `shell: true` | Read-only git operations (log, diff, blame, status) | Code review, changelog, audit stages |
+
+### Tool constraint examples:
+
+```yaml
+# Research stage — needs web access + can delegate to skills
+- name: research
+  tools: [file_read, web_search, web_fetch, skill_invoke]
+  constraints:
+    network: true
+
+# Code analysis stage — needs git + JSON parsing
+- name: code-analysis
+  tools: [file_read, file_write, git, json_parse]
+  constraints:
+    shell: true
+
+# Simple text processing — no special constraints needed
+- name: summarize
+  tools: [file_read, json_parse]
+```
+
+### skill_invoke usage:
+
+The `skill_invoke` tool lets a stage call any skill from `~/.huginn/skills/` as a sub-agent. The model sends the skill name and input text; Huginn finds the skill, calls the skill's model with the skill's prompt, and returns the response. This is useful for:
+
+- Delegating a classification subtask to a lightweight skill
+- Running a slop-filter check from within a drafting stage
+- Invoking a specialized analyzer without adding a full pipeline stage
+
+### git tool — allowed operations:
+
+Read-only: `log`, `diff`, `show`, `status`, `blame`, `shortlog`, `rev-parse`, `branch --list`, `tag --list`, `ls-files`, `describe`
+
+Blocked (write operations): `commit`, `push`, `pull`, `checkout`, `reset`, `merge`, `rebase`, `clean`, `rm`
 
 ## Model Name Format
 
@@ -165,4 +207,64 @@ stages:
 
 on_complete:
   output_file: final-post.md
+```
+
+## Example: Research Pipeline with Web + Git Tools
+
+```yaml
+name: security-audit
+description: Analyze a git repository for security issues using web research and code review
+version: "1.0"
+
+defaults:
+  backend: i3
+  timeout_minutes: 90
+
+stages:
+  - name: inventory
+    skill: skills/01-inventory.md
+    model: qwen2.5:7b
+    input: $pipeline_input
+    output: inventory.json
+    tools: [file_read, git, json_parse]
+    constraints:
+      shell: true           # git requires shell: true
+    verification:
+      - "Output must be valid JSON"
+
+  - name: research
+    skill: skills/02-research.md
+    model: qwen3:8b
+    input: inventory.json
+    output: research.json
+    tools: [file_read, web_search, web_fetch, json_parse]
+    constraints:
+      network: true          # web tools require network: true
+    verification:
+      - "Output must be valid JSON"
+
+  - name: analyze
+    skill: skills/03-analyze.md
+    model: qwen3.6:27b
+    backend: mac
+    input:
+      - inventory.json
+      - research.json
+    output: findings.md
+    tools: [file_read, json_parse, skill_invoke]
+    constraints:
+      network: true          # skill_invoke requires network: true (calls backend)
+
+  - name: report
+    skill: skills/04-report.md
+    model: qwen3.6:27b
+    backend: mac
+    input:
+      - inventory.json
+      - findings.md
+    output: security-report.md
+    tools: [file_read]       # report stage: text output, no special tools needed
+
+on_complete:
+  output_file: security-report.md
 ```

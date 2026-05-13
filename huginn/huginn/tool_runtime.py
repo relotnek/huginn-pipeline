@@ -15,7 +15,10 @@ from .tools import (
     execute_tool_call,
     file_read,
     file_write,
+    git,
+    json_parse,
     shell,
+    skill_invoke,
     web_fetch,
     web_search,
 )
@@ -95,6 +98,21 @@ _DEFAULT_REGISTRY.register_tool(
     TOOL_DEFINITIONS["shell"],
     lambda args, ctx: shell(args.get("command", ""), args.get("timeout", 30)),
 )
+_DEFAULT_REGISTRY.register_tool(
+    "git",
+    TOOL_DEFINITIONS["git"],
+    lambda args, ctx: git(args.get("command", ""), args.get("repo_path")),
+)
+_DEFAULT_REGISTRY.register_tool(
+    "json_parse",
+    TOOL_DEFINITIONS["json_parse"],
+    lambda args, ctx: json_parse(args.get("json_string", ""), args.get("path")),
+)
+_DEFAULT_REGISTRY.register_tool(
+    "skill_invoke",
+    TOOL_DEFINITIONS["skill_invoke"],
+    lambda args, ctx: skill_invoke(args.get("skill_name", ""), args.get("input_text", ""), ctx),
+)
 
 # Public accessor so callers can grab the singleton registry.
 tool_registry: ToolRegistry = _DEFAULT_REGISTRY
@@ -104,10 +122,10 @@ tool_registry: ToolRegistry = _DEFAULT_REGISTRY
 # Constraints
 # ---------------------------------------------------------------------------
 
-# Tools that require network: true
-_NETWORK_TOOLS = {"web_search", "web_fetch"}
+# Tools that require network: true (includes skill_invoke since it calls a backend)
+_NETWORK_TOOLS = {"web_search", "web_fetch", "skill_invoke"}
 # Tools that require shell: true
-_SHELL_TOOLS = {"shell"}
+_SHELL_TOOLS = {"shell", "git"}
 
 
 @dataclass

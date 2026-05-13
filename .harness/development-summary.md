@@ -2,7 +2,7 @@
 
 **Project**: Huginn — Skill-Based LLM Pipeline System
 **Date**: 2026-05-08
-**Status**: 54/120 features passing (45%)
+**Status**: 73/120 features passing (61%)
 
 ---
 

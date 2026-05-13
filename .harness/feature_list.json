@@ -141,7 +141,7 @@
       "id": "F011",
       "category": "manifest-parser",
       "priority": 2,
-      "description": "Manifest parser validates stage wiring — detects when a stage references an output no prior stage produces",
+      "description": "Manifest parser validates stage wiring \u2014 detects when a stage references an output no prior stage produces",
       "validation_steps": [
         "python -c 'from huginn.manifest import _validate_pipeline, Pipeline, StageDefinition; from pathlib import Path; p = Pipeline(name=\"test\", description=\"\", version=\"1\", pipeline_dir=Path(\".\"), defaults={}, stages=[StageDefinition(name=\"s1\", skill_path=\"x.md\", model=\"m\", backend=None, input=\"nonexistent.json\", output=\"out.md\")], on_complete={}); _validate_pipeline(p)'",
         "Assert exit code non-zero and stderr contains 'validation failed'"
@@ -541,7 +541,7 @@
       "id": "F041",
       "category": "agent-loop",
       "priority": 3,
-      "description": "Agent loop implements tool-call protocol — parses model output for tool invocations and executes them",
+      "description": "Agent loop implements tool-call protocol \u2014 parses model output for tool invocations and executes them",
       "validation_steps": [
         "grep -c 'ACTION:\\|tool_call\\|parse_tool\\|execute_tool' huginn/huginn/agent.py",
         "Assert output is at least 2 showing tool protocol implementation"
@@ -585,9 +585,9 @@
         "grep -c 'def web_search\\|def tool_web_search' huginn/huginn/agent.py huginn/huginn/tools.py",
         "Assert output is at least 1 showing web_search implementation"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "Phase 2 feature but critical for research pipelines like opensea-intel-briefing"
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "web_search via duckduckgo-search, gated by network constraint"
     },
     {
       "id": "F045",
@@ -598,9 +598,9 @@
         "grep -c 'def web_fetch\\|def tool_web_fetch' huginn/huginn/agent.py huginn/huginn/tools.py",
         "Assert output is at least 1 showing web_fetch implementation"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": null
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "web_fetch via urllib with HTML stripping, gated by network constraint"
     },
     {
       "id": "F046",
@@ -611,9 +611,9 @@
         "grep -c 'def shell\\|def tool_shell' huginn/huginn/agent.py huginn/huginn/tools.py",
         "Assert output is at least 1 showing shell implementation"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": null
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "shell via subprocess with blocklist, gated by shell constraint"
     },
     {
       "id": "F047",
@@ -689,9 +689,9 @@
         "ls huginn/pipelines/content-classifier/manifest.yaml",
         "Assert file exists"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "Spec requires 3 starter pipelines, only post-generator exists"
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "content-classifier pipeline: 3 stages (extract, classify, report)"
     },
     {
       "id": "F053",
@@ -702,9 +702,9 @@
         "ls huginn/pipelines/code-reviewer/manifest.yaml",
         "Assert file exists"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "Spec requires 3 starter pipelines, only post-generator exists"
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "code-reviewer pipeline: 3 stages (inventory, analyze, report)"
     },
     {
       "id": "F054",
@@ -717,7 +717,7 @@
       ],
       "passes": true,
       "passed_in_session": 0,
-      "notes": "check_backend_reachable fails → clear error string with backend name and URL"
+      "notes": "check_backend_reachable fails \u2192 clear error string with backend name and URL"
     },
     {
       "id": "F055",
@@ -769,9 +769,9 @@
         "pytest --collect-only 2>/dev/null",
         "Assert pytest discovers tests"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "No test files exist in the project"
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "163 tests across 6 test files, all passing"
     },
     {
       "id": "F059",
@@ -782,9 +782,9 @@
         "find . -path '*/tests/*' -name '*.py'",
         "Assert test files exist for core modules"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": null
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "test_config, test_skill, test_manifest, test_verification, test_tools, test_checkpoint"
     },
     {
       "id": "F060",
@@ -795,9 +795,9 @@
         "grep -r 'checkpoint\\|resume' tests/",
         "Assert checkpoint/resume test exists"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": null
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "test_checkpoint.py with save/load/resume tests"
     },
     {
       "id": "F061",
@@ -860,22 +860,22 @@
         "huginn backends --help",
         "Assert exit code 0 and stdout contains usage information"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": null
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "huginn backends command with --check flag for reachability"
     },
     {
       "id": "F066",
       "category": "tool-runtime",
       "priority": 3,
-      "description": "Tool runtime abstraction separates tool execution from model inference — tools run where Huginn runs, not where the model runs",
+      "description": "Tool runtime abstraction separates tool execution from model inference \u2014 tools run where Huginn runs, not where the model runs",
       "validation_steps": [
         "grep -c 'class ToolRuntime\\|class ToolExecutor' huginn/huginn/tools.py huginn/huginn/tool_runtime.py",
         "Assert output is at least 1 showing tool runtime class"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "Core architectural piece: model is the brain (remote), tools are the hands (local to Huginn process)"
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "ToolRuntime class in tool_runtime.py"
     },
     {
       "id": "F067",
@@ -886,22 +886,22 @@
         "grep -c 'register_tool\\|tool_registry\\|get_tool' huginn/huginn/tools.py huginn/huginn/tool_runtime.py",
         "Assert output is at least 2 showing registration and lookup"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "Skills declare tools: [file_read, web_search]. Runtime resolves those names to implementations."
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "ToolRegistry with register_tool/get_tool/get_available_tools"
     },
     {
       "id": "F068",
       "category": "tool-runtime",
       "priority": 4,
-      "description": "Tool execution enforces skill constraints — blocks network tools when network: false, blocks shell when shell: false",
+      "description": "Tool execution enforces skill constraints \u2014 blocks network tools when network: false, blocks shell when shell: false",
       "validation_steps": [
         "grep -c 'constraint\\|allowed\\|permission\\|enforce' huginn/huginn/tool_runtime.py huginn/huginn/tools.py",
         "Assert output is at least 2 showing constraint enforcement"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": null
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "SkillConstraints enforced before tool execution (network/shell gating)"
     },
     {
       "id": "F069",
@@ -912,9 +912,9 @@
         "grep -c 'log_run\\|tool_log\\|record_tool' huginn/huginn/tool_runtime.py huginn/huginn/agent.py",
         "Assert output is at least 1 showing tool call logging"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "Uses existing db.log_run() to record each tool invocation within a stage"
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "ToolRuntime logs tool calls via db.log_run()"
     },
     {
       "id": "F070",
@@ -1070,7 +1070,7 @@
       ],
       "passes": false,
       "passed_in_session": null,
-      "notes": "Big models → mac backend, small models → i3 backend, based on model size and backend capabilities"
+      "notes": "Big models \u2192 mac backend, small models \u2192 i3 backend, based on model size and backend capabilities"
     },
     {
       "id": "F082",
@@ -1096,7 +1096,7 @@
       ],
       "passes": false,
       "passed_in_session": null,
-      "notes": "Follow the ravens — see all active pipelines, which stage they're on, which backend they're using"
+      "notes": "Follow the ravens \u2014 see all active pipelines, which stage they're on, which backend they're using"
     },
     {
       "id": "F084",
@@ -1115,7 +1115,7 @@
       "id": "F085",
       "category": "dashboard",
       "priority": 8,
-      "description": "Dashboard shows per-backend utilization — active models, queue depth, inference latency",
+      "description": "Dashboard shows per-backend utilization \u2014 active models, queue depth, inference latency",
       "validation_steps": [
         "grep -c 'utilization\\|queue_depth\\|latency' huginn/huginn/api.py huginn/huginn/server.py",
         "Assert output is at least 1 showing backend utilization metrics"
@@ -1161,9 +1161,9 @@
         "huginn cancel --help",
         "Assert exit code 0 and stdout contains usage information"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": null
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "huginn cancel command (alias for stop)"
     },
     {
       "id": "F089",
@@ -1187,9 +1187,9 @@
         "huginn batch --help",
         "Assert exit code 0 and stdout contains usage information"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": null
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "huginn batch command with --input-dir"
     },
     {
       "id": "F091",
@@ -1241,9 +1241,9 @@
         "huginn output --help",
         "Assert exit code 0 and stdout contains 'task_id'"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "Core set-and-forget UX: submit task, walk away, come back, huginn output <id> to see results."
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "huginn output command displays task output"
     },
     {
       "id": "F095",
@@ -1254,9 +1254,9 @@
         "huginn output --help",
         "Assert stdout contains '--download' or '--save' flag"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "Download all output files from a remote task to ./huginn-output/<task-id>/ or specified path"
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "huginn output --download copies output files to local dir"
     },
     {
       "id": "F096",
@@ -1306,9 +1306,9 @@
         "grep -c 'background\\|remote\\|local' huginn/huginn/cli.py",
         "Assert output is at least 2 showing unified status across execution modes"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "Same huginn status command works for: blocking local, background local, remote tasks"
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "Status shows Mode: background/local via _get_task_mode()"
     },
     {
       "id": "F100",
@@ -1319,9 +1319,9 @@
         "huginn tasks --help",
         "Assert stdout contains '--source' or execution mode filter"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": null
+      "passes": true,
+      "passed_in_session": 3,
+      "notes": "huginn tasks --mode [local|background] filter"
     },
     {
       "id": "F101",
@@ -1340,14 +1340,14 @@
       "id": "F102",
       "category": "notifications",
       "priority": 6,
-      "description": "Config supports notification preferences per pipeline — on_complete and on_failure hooks",
+      "description": "Config supports notification preferences per pipeline \u2014 on_complete and on_failure hooks",
       "validation_steps": [
         "grep -c 'on_complete\\|on_failure\\|notify' huginn/huginn/config.py huginn/huginn/notifications.py",
         "Assert output is at least 2 showing configurable notification hooks"
       ],
       "passes": false,
       "passed_in_session": null,
-      "notes": "manifest.yaml on_complete already exists — extend with notify: {webhook: url, stdout: true}"
+      "notes": "manifest.yaml on_complete already exists \u2014 extend with notify: {webhook: url, stdout: true}"
     },
     {
       "id": "F103",
@@ -1392,7 +1392,7 @@
       "id": "F106",
       "category": "resilience",
       "priority": 3,
-      "description": "Backend health check runs before each stage and between tool-call rounds — detects unreachable backend mid-execution, not just at pipeline start",
+      "description": "Backend health check runs before each stage and between tool-call rounds \u2014 detects unreachable backend mid-execution, not just at pipeline start",
       "validation_steps": [
         "grep -c 'check_backend_reachable\\|health_check\\|backend.*alive' huginn/huginn/agent.py huginn/huginn/executor.py",
         "Assert output is at least 3 showing health checks at stage start, mid-loop, and on retry"
@@ -1412,7 +1412,7 @@
       ],
       "passes": false,
       "passed_in_session": null,
-      "notes": "If Mac sleeps for 10 min then wakes, tasks should resume — not fail permanently. Config: backend_retry_minutes (default 30), retry_interval_seconds (default 30)."
+      "notes": "If Mac sleeps for 10 min then wakes, tasks should resume \u2014 not fail permanently. Config: backend_retry_minutes (default 30), retry_interval_seconds (default 30)."
     },
     {
       "id": "F108",
@@ -1457,7 +1457,7 @@
       "id": "F111",
       "category": "resilience",
       "priority": 4,
-      "description": "Stage status machine tracks pending/queued/running/complete/failed/cancelled/interrupted with clean transitions — no duplicate stage records on resume",
+      "description": "Stage status machine tracks pending/queued/running/complete/failed/cancelled/interrupted with clean transitions \u2014 no duplicate stage records on resume",
       "validation_steps": [
         "python3 -c 'from huginn.db import HuginnDB; from pathlib import Path; import tempfile; db = HuginnDB(Path(tempfile.mktemp(suffix=\".db\"))); tid = db.create_task(\"t\",\"/i\",\"/o\",2); sid = db.create_stage(tid,0,\"s\",\"sk\",\"m\",\"b\"); db.update_stage(sid, status=\"running\"); db.update_stage(sid, status=\"interrupted\"); db.update_stage(sid, status=\"running\"); stages = db.get_stages(tid); print(len(stages)); db.close()'",
         "Assert stdout is 1 (single stage record reused, not duplicated)"
@@ -1561,14 +1561,14 @@
       "id": "F119",
       "category": "resilience",
       "priority": 6,
-      "description": "Automatic task pause when all backends for a task's remaining stages become unreachable — task enters 'paused' state instead of failing",
+      "description": "Automatic task pause when all backends for a task's remaining stages become unreachable \u2014 task enters 'paused' state instead of failing",
       "validation_steps": [
         "grep -c 'paused\\|pause.*task\\|auto_pause' huginn/huginn/executor.py huginn/huginn/agent.py",
         "Assert output is at least 1 showing automatic pause on backend loss"
       ],
       "passes": false,
       "passed_in_session": null,
-      "notes": "Mac sleeps → tasks hitting mac pause instead of fail. When mac wakes, paused tasks auto-resume. Requires health watchdog (F117)."
+      "notes": "Mac sleeps \u2192 tasks hitting mac pause instead of fail. When mac wakes, paused tasks auto-resume. Requires health watchdog (F117)."
     },
     {
       "id": "F120",
@@ -1584,6 +1584,34 @@
       "notes": "Currently stale detection happens lazily on huginn tasks/status. Should also run on any huginn command so the DB is always consistent."
     }
   ],
-  "categories": ["core", "config", "skill-parser", "manifest-parser", "database", "ollama-client", "agent-loop", "verification", "checkpoint", "executor", "cli", "pipeline", "orchestrator", "tools", "sandbox", "error-handling", "testing", "backend-abstraction", "tool-runtime", "deployment", "scheduling", "parallel", "dashboard", "remote-client", "async-execution", "notifications", "resilience"],
+  "categories": [
+    "core",
+    "config",
+    "skill-parser",
+    "manifest-parser",
+    "database",
+    "ollama-client",
+    "agent-loop",
+    "verification",
+    "checkpoint",
+    "executor",
+    "cli",
+    "pipeline",
+    "orchestrator",
+    "tools",
+    "sandbox",
+    "error-handling",
+    "testing",
+    "backend-abstraction",
+    "tool-runtime",
+    "deployment",
+    "scheduling",
+    "parallel",
+    "dashboard",
+    "remote-client",
+    "async-execution",
+    "notifications",
+    "resilience"
+  ],
   "immutable_after_session_0": true
 }

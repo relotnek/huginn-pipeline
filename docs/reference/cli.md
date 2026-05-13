@@ -86,6 +86,7 @@ huginn tasks [options]
 |--------|-------|-------------|
 | `--limit` | `-n` | Number of tasks to show (default: 20) |
 | `--status` | `-s` | Filter by status: `running`, `complete`, `failed`, `interrupted`, `cancelled` |
+| `--mode` | `-m` | Filter by execution mode: `local` or `background` |
 
 **Examples:**
 
@@ -93,6 +94,7 @@ huginn tasks [options]
 huginn tasks
 huginn tasks --status failed --limit 5
 huginn tasks -s running
+huginn tasks --mode background
 ```
 
 ---
@@ -152,6 +154,30 @@ huginn logs a3f7b2c1 -n 100
 
 !!! note
     Logs are only available for background tasks (`--bg`). Foreground tasks print to stdout.
+
+---
+
+## huginn output
+
+View or download the output of a completed task.
+
+```bash
+huginn output <task_id> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--download` | `-d` | Save output files to a local directory |
+
+**Examples:**
+
+```bash
+# View output in terminal
+huginn output a3f7b2c1
+
+# Download output files to local directory
+huginn output a3f7b2c1 --download ./results/
+```
 
 ---
 
