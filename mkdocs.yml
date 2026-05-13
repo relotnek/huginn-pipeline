@@ -1,0 +1,92 @@
+site_name: Huginn
+site_description: Skill-based LLM pipeline system for local infrastructure
+site_url: https://asgarddev.github.io/huginn/
+repo_url: https://github.com/asgarddev/huginn
+repo_name: asgarddev/huginn
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - scheme: default
+      primary: deep purple
+      accent: amber
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+  font:
+    text: Inter
+    code: JetBrains Mono
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
+  - Guides:
+    - Writing Skills: guides/writing-skills.md
+    - Creating Pipelines: guides/creating-pipelines.md
+    - Using Backends: guides/backends.md
+    - Background Execution: guides/background-execution.md
+    - Checkpoint & Resume: guides/checkpoint-resume.md
+  - Tutorials:
+    - "Tutorial: Your First Pipeline": tutorials/first-pipeline.md
+    - "Tutorial: Multi-Backend Routing": tutorials/multi-backend.md
+  - Reference:
+    - CLI Commands: reference/cli.md
+    - Manifest Schema: reference/manifest-schema.md
+    - Skill Format: reference/skill-format.md
+    - Tools: reference/tools.md
+    - Models: reference/models.md
+    - Configuration File: reference/config.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - Brain & Hands Separation: architecture/brain-hands.md
+    - Agent Loop: architecture/agent-loop.md
+    - Roadmap: architecture/roadmap.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/asgarddev/huginn

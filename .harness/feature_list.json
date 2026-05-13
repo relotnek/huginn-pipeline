@@ -1387,8 +1387,203 @@
       "passes": false,
       "passed_in_session": null,
       "notes": "Quick validation that remote target is reachable and healthy before submitting work"
+    },
+    {
+      "id": "F106",
+      "category": "resilience",
+      "priority": 3,
+      "description": "Backend health check runs before each stage and between tool-call rounds — detects unreachable backend mid-execution, not just at pipeline start",
+      "validation_steps": [
+        "grep -c 'check_backend_reachable\\|health_check\\|backend.*alive' huginn/huginn/agent.py huginn/huginn/executor.py",
+        "Assert output is at least 3 showing health checks at stage start, mid-loop, and on retry"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Currently only checks backend at stage start. If Mac sleeps mid-stage, the model call fails with a connection error and retries 3x then dies. Need to detect unreachable vs. model error."
+    },
+    {
+      "id": "F107",
+      "category": "resilience",
+      "priority": 3,
+      "description": "Backend unavailable during execution triggers wait-and-retry with configurable backoff instead of immediate failure",
+      "validation_steps": [
+        "grep -c 'wait_for_backend\\|backend_retry\\|reconnect\\|backoff.*backend' huginn/huginn/agent.py huginn/huginn/executor.py",
+        "Assert output is at least 1 showing wait-and-retry on backend unavailability"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "If Mac sleeps for 10 min then wakes, tasks should resume — not fail permanently. Config: backend_retry_minutes (default 30), retry_interval_seconds (default 30)."
+    },
+    {
+      "id": "F108",
+      "category": "resilience",
+      "priority": 3,
+      "description": "Backend failover re-routes a stage to an alternate backend that has the same model when the primary backend is unreachable",
+      "validation_steps": [
+        "grep -c 'failover\\|fallback_backend\\|alternate_backend\\|reroute' huginn/huginn/executor.py",
+        "Assert output is at least 1 showing backend failover logic"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "If qwen2.5:7b is on both i3 and mac, and mac goes down, retry the stage on i3 automatically. Check model availability on alternate backends before failover."
+    },
+    {
+      "id": "F109",
+      "category": "resilience",
+      "priority": 3,
+      "description": "Concurrency limiter prevents more than N simultaneous tasks per backend (reads max_parallel_workers from config)",
+      "validation_steps": [
+        "grep -c 'concurrency\\|lock\\|semaphore\\|max_parallel\\|slot' huginn/huginn/executor.py huginn/huginn/queue.py huginn/huginn/background.py",
+        "Assert output is at least 2 showing concurrency control per backend"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Config has max_parallel_workers: 2 but nothing reads it. Multiple --bg tasks all hit the same backend simultaneously. Need a lock file or DB-based semaphore per backend."
+    },
+    {
+      "id": "F110",
+      "category": "resilience",
+      "priority": 3,
+      "description": "Task queue with priority ordering ensures high-priority tasks get backend access before low-priority ones",
+      "validation_steps": [
+        "grep -c 'priority\\|queue_position\\|next_task\\|dequeue' huginn/huginn/queue.py huginn/huginn/executor.py",
+        "Assert output is at least 2 showing priority-aware task scheduling"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "DB tasks table already has priority column (default 0). Need queue logic that picks highest-priority waiting task when a slot opens."
+    },
+    {
+      "id": "F111",
+      "category": "resilience",
+      "priority": 4,
+      "description": "Stage status machine tracks pending/queued/running/complete/failed/cancelled/interrupted with clean transitions — no duplicate stage records on resume",
+      "validation_steps": [
+        "python3 -c 'from huginn.db import HuginnDB; from pathlib import Path; import tempfile; db = HuginnDB(Path(tempfile.mktemp(suffix=\".db\"))); tid = db.create_task(\"t\",\"/i\",\"/o\",2); sid = db.create_stage(tid,0,\"s\",\"sk\",\"m\",\"b\"); db.update_stage(sid, status=\"running\"); db.update_stage(sid, status=\"interrupted\"); db.update_stage(sid, status=\"running\"); stages = db.get_stages(tid); print(len(stages)); db.close()'",
+        "Assert stdout is 1 (single stage record reused, not duplicated)"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Currently executor creates new stage records on resume instead of reusing existing ones. Causes duplicate rows in huginn status."
+    },
+    {
+      "id": "F112",
+      "category": "resilience",
+      "priority": 4,
+      "description": "Resume detects partially-completed stages (checkpoint exists but output may be stale) and re-runs them instead of skipping",
+      "validation_steps": [
+        "grep -c 'checkpoint.*stale\\|partial.*output\\|needs_rerun\\|stage_needs_resume' huginn/huginn/executor.py",
+        "Assert output is at least 1 showing partial-completion detection"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Current _stage_completed() only checks if output files exist. A stage killed mid-write has output files but they're incomplete. Need to check checkpoint.json for completion marker."
+    },
+    {
+      "id": "F113",
+      "category": "resilience",
+      "priority": 4,
+      "description": "huginn retry command re-runs a specific stage within a completed or failed task without re-running the entire pipeline",
+      "validation_steps": [
+        "huginn retry --help",
+        "Assert exit code 0 and stdout contains 'task_id' and '--stage'"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Sometimes a single stage produces bad output. huginn retry <id> --stage 3 clears stage 3 output and re-runs just that stage, then re-chains downstream."
+    },
+    {
+      "id": "F114",
+      "category": "resilience",
+      "priority": 4,
+      "description": "Per-backend concurrency config allows different limits for different backends (e.g., i3 can handle 1 concurrent task, mac can handle 2)",
+      "validation_steps": [
+        "python3 -c 'from huginn.config import load_config; c = load_config(); print(c[\"backends\"])'",
+        "Assert output shows backend entries with max_concurrent or similar field"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "i3 CPU can barely handle 1 model at a time. Mac GPU can handle 2-3. OpenRouter has no practical limit. Config: backends.i3.max_concurrent: 1, backends.mac.max_concurrent: 2"
+    },
+    {
+      "id": "F115",
+      "category": "resilience",
+      "priority": 5,
+      "description": "huginn queue command shows pending tasks waiting for backend availability with estimated wait time",
+      "validation_steps": [
+        "huginn queue --help",
+        "Assert exit code 0 and stdout contains usage information"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "When concurrency limiter is holding tasks, show what's waiting and why."
+    },
+    {
+      "id": "F116",
+      "category": "resilience",
+      "priority": 5,
+      "description": "Stage executor writes completion marker to checkpoint.json on clean finish, distinguishing complete from interrupted mid-write",
+      "validation_steps": [
+        "grep -c 'completed.*true\\|stage_complete\\|completion_marker' huginn/huginn/agent.py",
+        "Assert output is at least 1 showing completion marker in checkpoint"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "checkpoint.json currently tracks iterations/tokens/history but not 'this stage finished cleanly'. Add completed: true on clean exit."
+    },
+    {
+      "id": "F117",
+      "category": "resilience",
+      "priority": 5,
+      "description": "Backend health watchdog periodically checks all backends and updates their status in a shared state file or DB table",
+      "validation_steps": [
+        "grep -c 'watchdog\\|health_monitor\\|backend_status' huginn/huginn/backends.py huginn/huginn/executor.py huginn/huginn/health.py",
+        "Assert output is at least 1 showing periodic health monitoring"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Instead of checking health per-request, run a background thread that pings backends every 30s and writes status. Tasks read status before dispatching."
+    },
+    {
+      "id": "F118",
+      "category": "resilience",
+      "priority": 5,
+      "description": "huginn health command shows real-time status of all backends with latency, loaded models, and active task count",
+      "validation_steps": [
+        "huginn health --help",
+        "Assert exit code 0 and stdout contains usage information"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Quick operational check before kicking off batch work. Shows: backend name, reachable, latency, models loaded, tasks currently running."
+    },
+    {
+      "id": "F119",
+      "category": "resilience",
+      "priority": 6,
+      "description": "Automatic task pause when all backends for a task's remaining stages become unreachable — task enters 'paused' state instead of failing",
+      "validation_steps": [
+        "grep -c 'paused\\|pause.*task\\|auto_pause' huginn/huginn/executor.py huginn/huginn/agent.py",
+        "Assert output is at least 1 showing automatic pause on backend loss"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Mac sleeps → tasks hitting mac pause instead of fail. When mac wakes, paused tasks auto-resume. Requires health watchdog (F117)."
+    },
+    {
+      "id": "F120",
+      "category": "resilience",
+      "priority": 6,
+      "description": "Stale task reaper runs on huginn startup and marks old running/queued tasks as interrupted if their process is dead",
+      "validation_steps": [
+        "grep -c 'reap\\|stale.*cleanup\\|startup.*check' huginn/huginn/cli.py huginn/huginn/db.py",
+        "Assert output is at least 1 showing startup stale task detection"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Currently stale detection happens lazily on huginn tasks/status. Should also run on any huginn command so the DB is always consistent."
     }
   ],
-  "categories": ["core", "config", "skill-parser", "manifest-parser", "database", "ollama-client", "agent-loop", "verification", "checkpoint", "executor", "cli", "pipeline", "orchestrator", "tools", "sandbox", "error-handling", "testing", "backend-abstraction", "tool-runtime", "deployment", "scheduling", "parallel", "dashboard", "remote-client", "async-execution", "notifications"],
+  "categories": ["core", "config", "skill-parser", "manifest-parser", "database", "ollama-client", "agent-loop", "verification", "checkpoint", "executor", "cli", "pipeline", "orchestrator", "tools", "sandbox", "error-handling", "testing", "backend-abstraction", "tool-runtime", "deployment", "scheduling", "parallel", "dashboard", "remote-client", "async-execution", "notifications", "resilience"],
   "immutable_after_session_0": true
 }

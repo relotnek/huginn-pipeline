@@ -359,14 +359,19 @@ def resume(task_id: str, backend: str | None, quiet: bool):
 
 
 def _is_task_process_alive(huginn_home: Path, task_id: str) -> bool:
-    """Check if a task's background process is still running."""
-    import signal
+    """Check if a task's background process is still running.
 
+    Returns True if the task has no PID file (foreground task still in progress)
+    or if the recorded PID is still alive. Only returns False when we have a PID
+    file and the process is confirmed dead — that's the only case where we can
+    safely mark a task as interrupted.
+    """
     pid_path = huginn_home / "tasks" / task_id / "pid"
     if not pid_path.exists():
-        # No PID file — was a foreground task. If status is "running",
-        # the process that set it is gone (we wouldn't be checking otherwise).
-        return False
+        # No PID file — this was a foreground task. We can't tell from here
+        # whether the foreground process is still running, so assume it is.
+        # Foreground tasks will update their own status on completion/failure.
+        return True
 
     try:
         pid = int(pid_path.read_text().strip())

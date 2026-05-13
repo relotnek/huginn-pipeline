@@ -88,3 +88,31 @@ def get_backend_config(config: dict[str, Any], backend_name: str | None = None) 
     backend.setdefault("type", "ollama")
     backend["name"] = name
     return backend
+
+
+def resolve_model_name(model: str, backend_config: dict[str, Any]) -> str:
+    """Translate a model name for a specific backend.
+
+    Pipelines are written with Ollama model names (e.g., qwen3.6:35b-a3b).
+    When running on a different backend, the model_map in backend config
+    translates to that backend's naming convention.
+
+    Config example:
+        backends:
+          openrouter:
+            type: openrouter
+            url: https://openrouter.ai/api/v1
+            api_key_env: OPENROUTER_API_KEY
+            model_map:
+              qwen3.6:35b-a3b: qwen/qwen3-32b
+              qwen3:30b-a3b: qwen/qwen3-30b-a3b
+              qwen2.5:7b: qwen/qwen-2.5-7b-instruct
+    """
+    model_map = backend_config.get("model_map", {})
+    mapped = model_map.get(model)
+    if mapped:
+        return mapped
+
+    # No explicit mapping — if backend is not ollama and model doesn't
+    # look like a provider/model name, warn but pass through
+    return model

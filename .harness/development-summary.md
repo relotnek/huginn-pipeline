@@ -2,7 +2,7 @@
 
 **Project**: Huginn — Skill-Based LLM Pipeline System
 **Date**: 2026-05-08
-**Status**: 44/105 features passing (42%)
+**Status**: 54/120 features passing (45%)
 
 ---
 
@@ -157,6 +157,49 @@ REMOTE:             huginn --target heimdall run pipeline --input file.md
 - Config profiles for named remote targets (F104)
 - `huginn connect` for remote health check (F105)
 
+### Phase 3.5 — Resilience + Resource Management
+
+**Goal**: Tasks survive disruption. Backends don't get overwhelmed. Resume actually works.
+
+Three problems this solves:
+1. **Laptop closes → backend dies → tasks fail.** Currently if Mac sleeps, tasks hitting the Mac backend fail after 3 retries. Need: wait-and-retry with backoff (F107), backend failover to alternate backends with the same model (F108), auto-pause when all backends are down (F119).
+2. **Batched jobs overwhelm the backend.** Nothing prevents 5 background tasks all hitting i3 simultaneously. Need: per-backend concurrency limiter (F109, F114), priority queue (F110), queue visibility (F115).
+3. **Resume is fragile.** Duplicate stage records on resume, no way to distinguish clean completion from interrupted mid-write, no way to re-run a single stage. Need: stage state machine (F111), completion markers (F116), partial-output detection (F112), `huginn retry --stage N` (F113).
+
+**Key features:**
+- Mid-execution health checks (F106) — detect backend death between stages and tool rounds
+- Wait-and-retry on backend unavailability (F107) — configurable backoff, don't fail immediately
+- Backend failover (F108) — re-route to alternate backend with same model
+- Concurrency limiter per backend (F109, F114) — respect max_parallel_workers, per-backend limits
+- Priority task queue (F110) — high-priority tasks get slots first
+- Stage state machine (F111) — clean transitions, no duplicate records on resume
+- Partial-output detection (F112) — re-run stages that were interrupted mid-write
+- `huginn retry <id> --stage N` (F113) — re-run a specific stage
+- Completion markers in checkpoint (F116) — distinguish done from died
+- Backend health watchdog (F117) — periodic ping, shared status
+- `huginn health` command (F118) — operational status check
+- Auto-pause on backend loss (F119) — pause instead of fail, auto-resume on wake
+- Stale task reaper on startup (F120) — consistent DB state
+
+**Implementation priority within this phase:**
+```
+F106 Mid-execution health checks        ← quick win, prevents silent failures
+F107 Wait-and-retry on backend loss      ← laptop-close survival
+F109 Concurrency limiter                 ← prevents backend overload
+F116 Completion markers                  ← foundation for clean resume
+F111 Stage state machine                 ← fixes duplicate records
+F112 Partial-output detection            ← safe resume
+F108 Backend failover                    ← automatic recovery
+F114 Per-backend concurrency config      ← right-size limits
+F110 Priority queue                      ← fair scheduling
+F113 huginn retry --stage N              ← operational convenience
+F118 huginn health                       ← operational visibility
+F117 Backend health watchdog             ← foundation for auto-pause
+F119 Auto-pause on backend loss          ← full laptop-close resilience
+F120 Stale task reaper                   ← startup consistency
+F115 huginn queue                        ← queue visibility
+```
+
 ### Phase 4 — Infrastructure + Scheduling
 
 **Goal**: Huginn becomes infrastructure. Daemon, API, scheduling, parallelism.
@@ -216,8 +259,9 @@ REMOTE:             huginn --target heimdall run pipeline --input file.md
 | deployment | 0/8 | 8 | 4 |
 | scheduling | 0/2 | 2 | 4 |
 | parallel | 0/3 | 3 | 4 |
+| resilience | 0/15 | 15 | 3.5 |
 | dashboard | 0/4 | 4 | 5 |
-| **TOTAL** | **44/105** | **105** | |
+| **TOTAL** | **54/120** | **120** | |
 
 ---
 

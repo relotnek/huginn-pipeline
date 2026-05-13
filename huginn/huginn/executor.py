@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .agent import AgentContext, AgentResult, run_agent
-from .config import get_backend_config, get_backend_url, get_huginn_home, load_config
+from .config import get_backend_config, get_backend_url, get_huginn_home, load_config, resolve_model_name
 from .db import HuginnDB
 from .manifest import Pipeline, StageDefinition, parse_manifest
 from .ollama_client import check_backend_reachable, check_model_available, get_client
@@ -96,13 +96,18 @@ def execute_pipeline(
             db.update_task(task_id, current_stage=i + 1)
             continue
 
-        _log(f"  Stage {i + 1}/{len(pipeline.stages)} '{stage_def.name}' ({stage_def.model})...", verbose)
-
         # Resolve backend
         backend_name = backend_override or stage_def.backend or pipeline.default_backend or config["default_backend"]
         backend_cfg = get_backend_config(config, backend_name)
         backend_url = backend_cfg["url"]
         backend_type = backend_cfg.get("type", "ollama")
+
+        # Resolve model name for this backend (e.g., Ollama → OpenRouter name)
+        stage_model = resolve_model_name(stage_def.model, backend_cfg)
+        if stage_model != stage_def.model:
+            _log(f"  Stage {i + 1}/{len(pipeline.stages)} '{stage_def.name}' ({stage_def.model} → {stage_model} on {backend_name})...", verbose)
+        else:
+            _log(f"  Stage {i + 1}/{len(pipeline.stages)} '{stage_def.name}' ({stage_model} on {backend_name})...", verbose)
 
         # Check backend reachability
         if not check_backend_reachable(backend_url, backend_cfg):
@@ -112,15 +117,20 @@ def execute_pipeline(
 
         # Check model availability
         client = get_client(backend_url, backend_cfg)
-        if not check_model_available(client, stage_def.model, backend_cfg):
+        if not check_model_available(client, stage_model, backend_cfg):
             if backend_type == "ollama":
-                hint = f"Pull it with: docker exec -it ollama ollama pull {stage_def.model}"
+                hint = f"Pull it with: docker exec -it ollama ollama pull {stage_model}"
             elif backend_type == "openrouter":
-                hint = f"Check available models at https://openrouter.ai/models"
+                mapped_from = f" (mapped from '{stage_def.model}')" if stage_model != stage_def.model else ""
+                hint = (
+                    f"Check available models at https://openrouter.ai/models — "
+                    f"or add a model_map entry in config.yaml for backend '{backend_name}'"
+                    f"{mapped_from}"
+                )
             else:
                 hint = "Check that the model name is correct for this backend"
             error = (
-                f"Model '{stage_def.model}' not available on '{backend_name}'. {hint}"
+                f"Model '{stage_model}' not available on '{backend_name}'. {hint}"
             )
             _fail_task(db, task_id, meta, task_dir, error)
             return {"task_id": task_id, "status": "failed", "error": error}
@@ -146,7 +156,7 @@ def execute_pipeline(
             stage_index=i,
             stage_name=stage_def.name,
             skill_name=skill.name,
-            model=stage_def.model,
+            model=stage_model,
             backend=backend_name,
         )
         db.update_stage(stage_id, status="running", started_at=datetime.now(timezone.utc).isoformat())
@@ -157,7 +167,7 @@ def execute_pipeline(
         # Build agent context and run
         ctx = AgentContext(
             skill_prompt=skill.system_prompt,
-            model=stage_def.model,
+            model=stage_model,
             backend_url=backend_url,
             temperature=skill.temperature,
             max_iterations=skill.max_iterations,
@@ -186,7 +196,7 @@ def execute_pipeline(
 
         stage_meta = {
             "name": stage_def.name,
-            "model": stage_def.model,
+            "model": stage_model,
             "backend": backend_name,
             "status": "complete" if result.success else "failed",
             "iterations": result.iterations,
