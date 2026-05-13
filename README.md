@@ -1,6 +1,8 @@
-# Huginn
-
-*Send out the ravens. They come back with results.*
+<div align="center">
+  <img src="images/huginnlogobanner.png" alt="Huginn" width="600">
+  <br><br>
+  <em>Send out the ravens. They come back with results.</em>
+</div>
 
 Huginn is a Python CLI for building and running autonomous LLM pipelines on local and remote infrastructure. You write skill files that make cheap models smart on narrow tasks, chain them into pipelines, and run them against your Ollama backends — or through OpenRouter to access any model from any provider. Frontier intelligence authors skills once; local models execute them repeatedly, for free.
 

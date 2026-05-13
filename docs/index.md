@@ -1,6 +1,8 @@
-# Huginn
-
-*Send out the ravens. They come back with results.*
+<div align="center">
+  <img src="images/huginnlogobanner.png" alt="Huginn" width="600">
+  <br><br>
+  <em>Send out the ravens. They come back with results.</em>
+</div>
 
 ---
 

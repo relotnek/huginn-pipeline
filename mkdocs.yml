@@ -29,6 +29,8 @@ theme:
     - search.suggest
     - search.highlight
     - toc.follow
+  logo: images/huginlogosimple.png
+  favicon: images/huginlogosimple.png
   icon:
     repo: fontawesome/brands/github
   font:
