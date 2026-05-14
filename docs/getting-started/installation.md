@@ -10,13 +10,40 @@
 
 ## Install Huginn
 
+### Quick Install (recommended)
+
+From the repo root, run the install script:
+
+```bash
+git clone https://github.com/asgarddev/huginn.git
+cd huginn
+./install.sh
+```
+
+This creates a virtual environment at `~/.huginn-venv`, installs Huginn into it, and symlinks the `huginn` command into `~/.local/bin/` so it works without activating the venv.
+
+### Manual Install
+
+If you prefer to manage the venv yourself:
+
 ```bash
 git clone https://github.com/asgarddev/huginn.git
 cd huginn/huginn
+python3 -m venv ~/.huginn-venv
+source ~/.huginn-venv/bin/activate
 pip install -e .
 ```
 
-Verify the installation:
+To use `huginn` without activating the venv each time, add the activate line to your shell profile (`~/.bashrc` or `~/.zshrc`), or symlink the binary:
+
+```bash
+ln -sf ~/.huginn-venv/bin/huginn ~/.local/bin/huginn
+```
+
+!!! note "PEP 668 — Externally Managed Environments"
+    Modern Linux distributions (Debian 12+, Ubuntu 23.04+, Fedora 38+) block bare `pip install` to protect system Python packages. The venv approach above avoids this. **Do not** use `--break-system-packages`.
+
+### Verify
 
 ```bash
 huginn --help

@@ -481,8 +481,11 @@ def _load_checkpoint(output_dir: Path) -> dict | None:
     return None
 
 
+_INTERNAL_FILES = {"checkpoint.json", "heartbeat.json"}
+
+
 def _list_output_files(output_dir: Path) -> list[str]:
-    """List files in the output directory."""
+    """List files in the output directory, excluding internal bookkeeping files."""
     if not output_dir.exists():
         return []
-    return [f.name for f in output_dir.iterdir() if f.is_file() and f.name != "checkpoint.json"]
+    return [f.name for f in output_dir.iterdir() if f.is_file() and f.name not in _INTERNAL_FILES]
