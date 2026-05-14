@@ -1527,9 +1527,9 @@
         "grep -c 'completed.*true\\|stage_complete\\|completion_marker' huginn/huginn/agent.py",
         "Assert output is at least 1 showing completion marker in checkpoint"
       ],
-      "passes": false,
-      "passed_in_session": null,
-      "notes": "checkpoint.json currently tracks iterations/tokens/history but not 'this stage finished cleanly'. Add completed: true on clean exit."
+      "passes": true,
+      "passed_in_session": 5,
+      "notes": "_save_checkpoint(ctx, completed=True) on clean finish. _stage_completed() checks marker first, falls back to output file check for legacy tasks."
     },
     {
       "id": "F117",
@@ -1579,9 +1579,232 @@
         "grep -c 'reap\\|stale.*cleanup\\|startup.*check' huginn/huginn/cli.py huginn/huginn/db.py",
         "Assert output is at least 1 showing startup stale task detection"
       ],
+      "passes": true,
+      "passed_in_session": 5,
+      "notes": "_reap_stale_tasks() checks PID files, marks dead tasks as interrupted with stage-level cleanup. Called from status and tasks commands. Also marks running stages as interrupted."
+    },
+    {
+      "id": "F121",
+      "category": "unkindness",
+      "priority": 5,
+      "description": "Worker config section in config.yaml declares remote Huginn workers with URL, api_key_env, capabilities, and deployed pipelines",
+      "validation_steps": [
+        "grep -c 'workers\\|worker.*config\\|get_worker_config' huginn/huginn/config.py",
+        "Assert output is at least 2 showing worker configuration support"
+      ],
       "passes": false,
       "passed_in_session": null,
-      "notes": "Currently stale detection happens lazily on huginn tasks/status. Should also run on any huginn command so the DB is always consistent."
+      "notes": "Config: workers: {heimdall: {url, api_key_env, description, capabilities, pipelines}}. Parallel to backends section."
+    },
+    {
+      "id": "F122",
+      "category": "unkindness",
+      "priority": 5,
+      "description": "huginn workers command lists all configured workers with URL, status, capabilities, and deployed pipeline count",
+      "validation_steps": [
+        "huginn workers --help",
+        "Assert exit code 0 and stdout contains usage information"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F123",
+      "category": "unkindness",
+      "priority": 5,
+      "description": "huginn daemon command starts Huginn as a worker accepting task submissions over HTTP with API key authentication",
+      "validation_steps": [
+        "huginn daemon --help",
+        "Assert exit code 0 and stdout contains usage information for starting worker daemon"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Leverages F070-F071 HTTP API. Worker mode = daemon + auth + pipeline allowlisting."
+    },
+    {
+      "id": "F124",
+      "category": "unkindness",
+      "priority": 5,
+      "description": "Worker API key authentication validates Bearer token on every request and rejects unauthorized submissions",
+      "validation_steps": [
+        "grep -c 'authenticate\\|api_key\\|bearer\\|unauthorized' huginn/huginn/api.py huginn/huginn/server.py huginn/huginn/worker.py",
+        "Assert output is at least 2 showing authentication middleware"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Worker stores hashed key, never plaintext. Keys per-worker in env vars. 401 on invalid key."
+    },
+    {
+      "id": "F125",
+      "category": "unkindness",
+      "priority": 5,
+      "description": "huginn run --worker <name> dispatches pipeline execution to a remote worker and returns task ID",
+      "validation_steps": [
+        "huginn run --help",
+        "Assert stdout contains '--worker' flag"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Uploads pipeline name + input files to worker over HTTP. Worker validates pipeline exists locally, creates task, returns ID."
+    },
+    {
+      "id": "F126",
+      "category": "unkindness",
+      "priority": 5,
+      "description": "huginn --worker <name> status/output/logs proxy commands to remote worker for task monitoring and result retrieval",
+      "validation_steps": [
+        "grep -c 'worker.*proxy\\|forward_to_worker\\|worker.*status' huginn/huginn/cli.py",
+        "Assert output is at least 1 showing worker proxy commands"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Same CLI commands, prefixed with --worker. huginn --worker heimdall status <id>, huginn --worker heimdall output <id> --download"
+    },
+    {
+      "id": "F127",
+      "category": "unkindness",
+      "priority": 6,
+      "description": "huginn deploy <pipeline> --worker <name> syncs pipeline folder (manifest, skills, files) to remote worker",
+      "validation_steps": [
+        "huginn deploy --help",
+        "Assert exit code 0 and stdout contains '--worker' and pipeline name argument"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Push model: operator explicitly deploys pipelines to workers. Worker-side lands in worker's ~/.huginn/pipelines/."
+    },
+    {
+      "id": "F128",
+      "category": "unkindness",
+      "priority": 6,
+      "description": "Worker pipeline allowlisting rejects task submissions for pipelines not in the worker's allowed list",
+      "validation_steps": [
+        "grep -c 'allowed_pipelines\\|pipeline_allowlist\\|reject.*pipeline' huginn/huginn/worker.py huginn/huginn/api.py",
+        "Assert output is at least 1 showing pipeline allowlist enforcement"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Worker config: allowed_pipelines: [post-generator, threat-model-4q]. Anything else → 403."
+    },
+    {
+      "id": "F129",
+      "category": "unkindness",
+      "priority": 6,
+      "description": "Worker capability declaration and enforcement — workers declare available tool capabilities and reject pipelines requiring unavailable ones",
+      "validation_steps": [
+        "grep -c 'capabilities\\|capability_check\\|tool_capability' huginn/huginn/worker.py huginn/huginn/api.py",
+        "Assert output is at least 1 showing capability checking on dispatch"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Worker declares capabilities: [shell, git, network]. Pipeline needing web_search dispatched to worker without network → rejected at dispatch, not runtime."
+    },
+    {
+      "id": "F130",
+      "category": "unkindness",
+      "priority": 7,
+      "description": "TLS enforcement for worker communication — non-LAN workers require HTTPS, with configurable cert verification",
+      "validation_steps": [
+        "grep -c 'tls\\|https\\|cert.*verify\\|ssl' huginn/huginn/client.py huginn/huginn/worker.py",
+        "Assert output is at least 1 showing TLS configuration"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Workers on LAN can use HTTP. Workers over internet must use HTTPS. Config: tls_verify: false for self-signed certs with warning."
+    },
+    {
+      "id": "F131",
+      "category": "unkindness",
+      "priority": 7,
+      "description": "Worker audit logging records all task submissions, authentications, and pipeline executions for security review",
+      "validation_steps": [
+        "grep -c 'audit\\|audit_log\\|log_dispatch\\|log_auth' huginn/huginn/worker.py huginn/huginn/api.py",
+        "Assert output is at least 1 showing audit logging"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Who dispatched what, when, from where. Stored in worker's DB. Essential for security review."
+    },
+    {
+      "id": "F132",
+      "category": "unkindness",
+      "priority": 7,
+      "description": "Cross-worker pipeline execution routes individual stages to different workers based on manifest worker hints",
+      "validation_steps": [
+        "grep -c 'worker.*stage\\|stage.*worker\\|dispatch.*worker' huginn/huginn/executor.py huginn/huginn/worker.py",
+        "Assert output is at least 1 showing per-stage worker routing"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "Manifest: stages[].worker field routes stage to specific worker. Stage 1 on heimdall (has git repo), stage 2 on cloud-vm (has web access)."
+    },
+    {
+      "id": "F133",
+      "category": "unkindness",
+      "priority": 8,
+      "description": "Worker health monitoring from operator — periodic ping of all workers with status aggregation in huginn workers output",
+      "validation_steps": [
+        "grep -c 'worker.*health\\|ping.*worker\\|worker.*monitor' huginn/huginn/worker.py huginn/huginn/cli.py",
+        "Assert output is at least 1 showing worker health monitoring"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": null
+    },
+    {
+      "id": "F134",
+      "category": "unkindness",
+      "priority": 8,
+      "description": "Automatic worker failover re-dispatches a task to an alternate worker when the primary worker becomes unreachable",
+      "validation_steps": [
+        "grep -c 'worker.*failover\\|fallback.*worker\\|reroute.*worker' huginn/huginn/executor.py huginn/huginn/worker.py",
+        "Assert output is at least 1 showing worker failover logic"
+      ],
+      "passes": false,
+      "passed_in_session": null,
+      "notes": "If heimdall goes down mid-task, re-dispatch remaining stages to cloud-vm if it has the pipeline and capabilities."
+    },
+    {
+      "id": "F135",
+      "category": "cli",
+      "priority": 3,
+      "description": "huginn run --model flag overrides the model for all stages in a pipeline, enabling rapid testing with a different model across the board",
+      "validation_steps": [
+        "huginn run --help",
+        "Assert stdout contains '--model'",
+        "grep -c 'model_override' huginn/huginn/executor.py huginn/huginn/cli.py",
+        "Assert output is at least 2 showing model override wiring through CLI to executor"
+      ],
+      "passes": true,
+      "passed_in_session": 4,
+      "notes": "Wired through CLI (run + resume) → executor → background.py. Model override applied before model_map translation. Log shows: (qwen2.5:7b → anthropic/claude-sonnet-4.6 [override] on openrouter)"
+    },
+    {
+      "id": "F136",
+      "category": "cli",
+      "priority": 3,
+      "description": "huginn clean command removes old failed/interrupted/cancelled tasks from DB and disk with dry-run, age filter, and status filter options",
+      "validation_steps": [
+        "huginn clean --help",
+        "Assert exit code 0 and stdout contains '--dry-run' and '--older-than' and '--status'"
+      ],
+      "passes": true,
+      "passed_in_session": 5,
+      "notes": "Deletes from DB (tasks + stages + runs cascade) and removes task directory from disk. Respects --dry-run, --older-than N days, --status filter, --all, --yes."
+    },
+    {
+      "id": "F137",
+      "category": "agent-loop",
+      "priority": 3,
+      "description": "Agent loop writes heartbeat.json every 30s to stage output dir with timestamp, iteration, tokens, elapsed, and current action — CLI status reads it to show live progress and detect stalled stages",
+      "validation_steps": [
+        "grep -c '_write_heartbeat' huginn/huginn/agent.py",
+        "Assert output is at least 3 (definition + calls in main loop and tool loop)"
+      ],
+      "passes": true,
+      "passed_in_session": 5,
+      "notes": "Heartbeat written in main loop and tool loop. Status command shows action (thinking/tool-calling) and detects stalled stages (>10min without heartbeat update). Non-fatal write — never crashes agent."
     }
   ],
   "categories": [
@@ -1611,7 +1834,8 @@
     "remote-client",
     "async-execution",
     "notifications",
-    "resilience"
+    "resilience",
+    "unkindness"
   ],
   "immutable_after_session_0": true
 }

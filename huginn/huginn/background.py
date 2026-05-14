@@ -14,6 +14,7 @@ def launch_background(
     pipeline_name: str,
     input_path: Path,
     backend_override: str | None = None,
+    model_override: str | None = None,
 ) -> dict[str, Any]:
     """Create task record and spawn detached subprocess.
 
@@ -46,6 +47,8 @@ def launch_background(
     ]
     if backend_override:
         cmd.extend(["--backend", backend_override])
+    if model_override:
+        cmd.extend(["--model", model_override])
 
     # Spawn fully detached — survives parent exit
     log_file = open(log_path, "w")
@@ -67,6 +70,7 @@ def run_background_entry(
     pipeline_name: str,
     input_path: str,
     backend_override: str | None = None,
+    model_override: str | None = None,
 ) -> None:
     """Entry point for the background subprocess. Runs pipeline to completion."""
     from .executor import execute_pipeline
@@ -77,6 +81,7 @@ def run_background_entry(
             pipeline_name=pipeline_name,
             input_path=input_p,
             backend_override=backend_override,
+            model_override=model_override,
             verbose=True,
             task_id=task_id,
         )
@@ -103,6 +108,7 @@ if __name__ == "__main__":
     parser.add_argument("--pipeline", required=True)
     parser.add_argument("--input", required=True)
     parser.add_argument("--backend", default=None)
+    parser.add_argument("--model", default=None)
     args = parser.parse_args()
 
-    run_background_entry(args.task_id, args.pipeline, args.input, args.backend)
+    run_background_entry(args.task_id, args.pipeline, args.input, args.backend, args.model)

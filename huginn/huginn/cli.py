@@ -18,6 +18,74 @@ from .skill import list_skills
 
 console = Console()
 
+HEARTBEAT_STALE_MINUTES = 10  # No heartbeat update in this long → likely stalled
+
+
+def _read_heartbeat(huginn_home: Path, task_id: str, stage_index: int, stage_name: str) -> dict | None:
+    """Read the heartbeat file for a running stage."""
+    heartbeat_path = (
+        huginn_home / "tasks" / task_id / "stages"
+        / f"{stage_index:02d}-{stage_name}" / "output" / "heartbeat.json"
+    )
+    if heartbeat_path.exists():
+        try:
+            return json.loads(heartbeat_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, PermissionError):
+            return None
+    return None
+
+
+def _reap_stale_tasks(huginn_home: Path, db: HuginnDB) -> list[str]:
+    """Mark running/queued tasks as interrupted if their process is dead.
+
+    Returns list of reaped task IDs. Uses PID file check as primary signal,
+    heartbeat staleness as secondary signal.
+    """
+    from datetime import datetime, timezone
+
+    running = db.list_tasks(status="running", limit=100)
+    reaped = []
+
+    for t in running:
+        task_id = t["id"]
+        if _is_task_process_alive(huginn_home, task_id):
+            # PID is alive — but check heartbeat staleness as secondary signal
+            # (process could be hung/zombie)
+            task_dir = huginn_home / "tasks" / task_id / "stages"
+            if task_dir.exists():
+                # Find the latest heartbeat across all stages
+                latest_heartbeat = None
+                for stage_dir in task_dir.iterdir():
+                    hb_path = stage_dir / "output" / "heartbeat.json"
+                    if hb_path.exists():
+                        try:
+                            hb = json.loads(hb_path.read_text(encoding="utf-8"))
+                            ts = hb.get("timestamp")
+                            if ts and (latest_heartbeat is None or ts > latest_heartbeat):
+                                latest_heartbeat = ts
+                        except (json.JSONDecodeError, PermissionError):
+                            pass
+
+                # If we have a heartbeat and it's very old, still don't auto-reap
+                # a process with a live PID — just let the user know via status display
+            continue
+
+        # PID is dead — reap
+        db.update_task(task_id, status="interrupted")
+        # Also mark any running stages as interrupted
+        stages = db.get_stages(task_id)
+        for s in stages:
+            if s["status"] == "running":
+                db.update_stage(
+                    s["id"],
+                    status="interrupted",
+                    error_message="Process died — reaped on startup",
+                    completed_at=datetime.now(timezone.utc).isoformat(),
+                )
+        reaped.append(task_id)
+
+    return reaped
+
 
 @click.group()
 @click.version_option(version="0.1.0")
@@ -29,10 +97,11 @@ def main():
 @main.command()
 @click.argument("pipeline_name")
 @click.option("--input", "-i", "input_path", required=True, help="Input file or directory")
-@click.option("--backend", "-b", default=None, help="Override backend (e.g., i3, mac)")
+@click.option("--backend", "-b", default=None, help="Override backend (e.g., i3, mac, openrouter)")
+@click.option("--model", "-m", default=None, help="Override model for all stages (e.g., anthropic/claude-sonnet-4.6)")
 @click.option("--bg", is_flag=True, help="Run in background, return immediately with task ID")
 @click.option("--quiet", "-q", is_flag=True, help="Suppress progress output")
-def run(pipeline_name: str, input_path: str, backend: str | None, bg: bool, quiet: bool):
+def run(pipeline_name: str, input_path: str, backend: str | None, model: str | None, bg: bool, quiet: bool):
     """Run a pipeline on an input file."""
     input_p = Path(input_path)
     if not input_p.exists():
@@ -43,7 +112,7 @@ def run(pipeline_name: str, input_path: str, backend: str | None, bg: bool, quie
         from .background import launch_background
 
         try:
-            result = launch_background(pipeline_name, input_p, backend)
+            result = launch_background(pipeline_name, input_p, backend, model)
         except Exception as e:
             console.print(f"[red]Failed to launch background task: {e}[/red]")
             sys.exit(1)
@@ -59,6 +128,7 @@ def run(pipeline_name: str, input_path: str, backend: str | None, bg: bool, quie
             pipeline_name=pipeline_name,
             input_path=input_p,
             backend_override=backend,
+            model_override=model,
             verbose=not quiet,
         )
     except FileNotFoundError as e:
@@ -92,10 +162,9 @@ def status(task_id: str):
         console.print(f"[red]Task '{task_id}' not found[/red]")
         sys.exit(1)
 
-    # Detect stale "running" status
-    if task["status"] == "running" and not _is_task_process_alive(huginn_home, task_id):
-        db.update_task(task_id, status="interrupted")
-        task = db.get_task(task_id)
+    # Reap stale tasks (F120)
+    _reap_stale_tasks(huginn_home, db)
+    task = db.get_task(task_id)
 
     # Task summary
     status_color = {
@@ -153,10 +222,33 @@ def status(task_id: str):
                 "failed": "red",
                 "pending": "dim",
                 "cancelled": "dim",
+                "interrupted": "magenta",
             }.get(s["status"], "white")
 
+            # For running stages, try to get live info from heartbeat
             time_str = f"{s['duration_seconds']:.1f}s" if s["duration_seconds"] else "-"
             tokens_str = str(s["tokens_used"]) if s["tokens_used"] else "-"
+            status_display = s["status"]
+
+            if s["status"] == "running":
+                hb = _read_heartbeat(huginn_home, task_id, s["stage_index"], s["stage_name"])
+                if hb:
+                    time_str = f"{hb['elapsed_seconds']:.0f}s"
+                    tokens_str = str(hb["total_tokens"]) if hb["total_tokens"] else "-"
+                    action = hb.get("action", "thinking")
+                    status_display = f"running ({action})"
+
+                    # Check if heartbeat is stale
+                    from datetime import datetime, timezone
+                    try:
+                        hb_time = datetime.fromisoformat(hb["timestamp"])
+                        age_minutes = (datetime.now(timezone.utc) - hb_time).total_seconds() / 60
+                        if age_minutes > HEARTBEAT_STALE_MINUTES:
+                            status_display = f"stalled? ({age_minutes:.0f}m silent)"
+                            s_color = "red"
+                    except (ValueError, KeyError):
+                        pass
+
             verified = "✓" if s["verification_passed"] == 1 else ("✗" if s["verification_passed"] == 0 else "-")
 
             table.add_row(
@@ -164,7 +256,7 @@ def status(task_id: str):
                 s["stage_name"],
                 s["model"] or "-",
                 s["backend"] or "-",
-                f"[{s_color}]{s['status']}[/{s_color}]",
+                f"[{s_color}]{status_display}[/{s_color}]",
                 time_str,
                 tokens_str,
                 verified,
@@ -285,16 +377,8 @@ def tasks(limit: int, filter_status: str | None, filter_mode: str | None):
         db.close()
         return
 
-    # Detect stale "running" tasks whose process is no longer alive
-    stale_ids = []
-    for t in task_list:
-        if t["status"] == "running":
-            if not _is_task_process_alive(huginn_home, t["id"]):
-                stale_ids.append(t["id"])
-
-    # Update stale tasks in DB
-    for stale_id in stale_ids:
-        db.update_task(stale_id, status="interrupted")
+    # Reap stale tasks (F120 — uses PID check + heartbeat staleness)
+    stale_ids = _reap_stale_tasks(huginn_home, db)
 
     # Re-fetch if we changed any statuses
     if stale_ids:
@@ -362,8 +446,9 @@ def tasks(limit: int, filter_status: str | None, filter_mode: str | None):
 @main.command()
 @click.argument("task_id")
 @click.option("--backend", "-b", default=None, help="Override backend for resumed stages")
+@click.option("--model", "-m", default=None, help="Override model for all resumed stages")
 @click.option("--quiet", "-q", is_flag=True, help="Suppress progress output")
-def resume(task_id: str, backend: str | None, quiet: bool):
+def resume(task_id: str, backend: str | None, model: str | None, quiet: bool):
     """Resume an interrupted task from the last completed stage."""
     huginn_home = get_huginn_home()
     db = HuginnDB(huginn_home / "huginn.db")
@@ -403,6 +488,7 @@ def resume(task_id: str, backend: str | None, quiet: bool):
             pipeline_name=pipeline_name,
             input_path=input_path,
             backend_override=backend,
+            model_override=model,
             verbose=not quiet,
             task_id=task_id,
         )
@@ -420,19 +506,16 @@ def resume(task_id: str, backend: str | None, quiet: bool):
 
 
 def _is_task_process_alive(huginn_home: Path, task_id: str) -> bool:
-    """Check if a task's background process is still running.
+    """Check if a task's process is still running.
 
-    Returns True if the task has no PID file (foreground task still in progress)
-    or if the recorded PID is still alive. Only returns False when we have a PID
-    file and the process is confirmed dead — that's the only case where we can
-    safely mark a task as interrupted.
+    Both foreground and background tasks now write PID files. If no PID file
+    exists, this is a legacy task whose process is almost certainly dead.
     """
     pid_path = huginn_home / "tasks" / task_id / "pid"
     if not pid_path.exists():
-        # No PID file — this was a foreground task. We can't tell from here
-        # whether the foreground process is still running, so assume it is.
-        # Foreground tasks will update their own status on completion/failure.
-        return True
+        # No PID file — legacy task from before PID-file-for-all. The process
+        # is almost certainly gone; mark it stale so it gets cleaned up.
+        return False
 
     try:
         pid = int(pid_path.read_text().strip())
@@ -655,6 +738,115 @@ def cancel(task_id: str):
     if task["current_stage"] and task["current_stage"] > 0:
         console.print(f"  Completed stages: {task['current_stage']}/{task['total_stages']}")
         console.print(f"  [dim]Resume later with: huginn resume {task_id}[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# F136 — clean command
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option(
+    "--status", "-s", "filter_statuses",
+    default="failed,interrupted,cancelled",
+    help="Comma-separated statuses to clean (default: failed,interrupted,cancelled)",
+)
+@click.option(
+    "--older-than", "-d", "older_than_days",
+    default=None, type=int,
+    help="Only clean tasks older than N days (default: no age filter)",
+)
+@click.option("--all", "clean_all", is_flag=True, help="Include completed tasks too")
+@click.option("--dry-run", is_flag=True, help="Show what would be cleaned without deleting")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def clean(filter_statuses: str, older_than_days: int | None, clean_all: bool, dry_run: bool, yes: bool):
+    """Remove old tasks from the database and disk.
+
+    By default cleans failed, interrupted, and cancelled tasks. Use --all
+    to also include completed tasks. Use --older-than to filter by age.
+
+    \b
+    Examples:
+      huginn clean                        # Clean all failed/interrupted/cancelled
+      huginn clean --older-than 7         # Only tasks older than 7 days
+      huginn clean --all --older-than 30  # Everything older than 30 days
+      huginn clean --dry-run              # Preview without deleting
+    """
+    huginn_home = get_huginn_home()
+    db = HuginnDB(huginn_home / "huginn.db")
+
+    statuses = [s.strip() for s in filter_statuses.split(",")]
+    if clean_all:
+        statuses.append("complete")
+
+    # Never clean running/queued tasks
+    statuses = [s for s in statuses if s not in ("running", "queued")]
+
+    tasks = db.list_cleanable_tasks(statuses, older_than_days)
+
+    if not tasks:
+        age_str = f" older than {older_than_days} days" if older_than_days else ""
+        console.print(f"[dim]No tasks to clean (statuses: {', '.join(statuses)}{age_str})[/dim]")
+        db.close()
+        return
+
+    # Show what will be cleaned
+    table = Table(title="Tasks to Clean" if not dry_run else "Tasks to Clean (dry run)")
+    table.add_column("ID", width=10)
+    table.add_column("Pipeline", min_width=15)
+    table.add_column("Status", min_width=10)
+    table.add_column("Queued", min_width=20)
+
+    for t in tasks:
+        s_color = {
+            "failed": "red",
+            "interrupted": "magenta",
+            "cancelled": "dim",
+            "complete": "green",
+        }.get(t["status"], "white")
+        queued = t["queued_at"][:19] if t["queued_at"] else "-"
+        table.add_row(
+            t["id"],
+            t["pipeline_name"],
+            f"[{s_color}]{t['status']}[/{s_color}]",
+            queued,
+        )
+
+    console.print(table)
+
+    disk_size = 0
+    for t in tasks:
+        task_dir = huginn_home / "tasks" / t["id"]
+        if task_dir.exists():
+            for f in task_dir.rglob("*"):
+                if f.is_file():
+                    disk_size += f.stat().st_size
+
+    size_str = f"{disk_size / 1024 / 1024:.1f} MB" if disk_size > 1024 * 1024 else f"{disk_size / 1024:.1f} KB"
+    console.print(f"\n{len(tasks)} task(s), ~{size_str} on disk")
+
+    if dry_run:
+        console.print("[dim]Dry run — nothing deleted[/dim]")
+        db.close()
+        return
+
+    if not yes:
+        if not click.confirm("Delete these tasks?"):
+            console.print("[dim]Cancelled[/dim]")
+            db.close()
+            return
+
+    # Delete
+    deleted = 0
+    for t in tasks:
+        task_dir = huginn_home / "tasks" / t["id"]
+        db.delete_task(t["id"])
+        if task_dir.exists():
+            shutil.rmtree(task_dir)
+        deleted += 1
+
+    db.close()
+    console.print(f"[green]{deleted} task(s) cleaned[/green]")
 
 
 # ---------------------------------------------------------------------------

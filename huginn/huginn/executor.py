@@ -1,6 +1,7 @@
 """Pipeline executor — runs stages in sequence, wires outputs to inputs."""
 
 import json
+import os
 import shutil
 import time
 from datetime import datetime, timezone
@@ -19,12 +20,15 @@ def execute_pipeline(
     pipeline_name: str,
     input_path: Path,
     backend_override: str | None = None,
+    model_override: str | None = None,
     verbose: bool = False,
     task_id: str | None = None,
 ) -> dict[str, Any]:
     """Execute a pipeline end-to-end. Returns task result dict.
 
     When task_id is provided, reuses an existing task record (for background mode).
+    When model_override is provided, it replaces the model for ALL stages (before
+    model_map translation). Useful for rapid testing with a hosted model.
     """
     config = load_config()
     huginn_home = get_huginn_home()
@@ -56,6 +60,11 @@ def execute_pipeline(
     (task_dir / "output").mkdir(exist_ok=True)
     (task_dir / "stages").mkdir(exist_ok=True)
 
+    # Write PID file so stale-task detection works for both foreground and background runs
+    pid_path = task_dir / "pid"
+    if not pid_path.exists():
+        pid_path.write_text(str(os.getpid()))
+
     # Copy input file(s) to task input directory
     if input_path.is_file():
         shutil.copy2(input_path, task_dir / "input" / input_path.name)
@@ -80,6 +89,30 @@ def execute_pipeline(
     # Execute stages
     start_time = time.time()
 
+    try:
+        return _run_stages(pipeline, task_id, task_dir, db, meta, config, backend_override, model_override, verbose, start_time)
+    except KeyboardInterrupt:
+        error = "Pipeline interrupted by user (Ctrl+C / signal)"
+        _log(f"\n  ✗ {error}", verbose)
+        _fail_task(db, task_id, meta, task_dir, error, status="interrupted")
+        db.close()
+        return {"task_id": task_id, "status": "interrupted", "error": error}
+
+
+def _run_stages(
+    pipeline: Pipeline,
+    task_id: str,
+    task_dir: Path,
+    db: HuginnDB,
+    meta: dict,
+    config: dict,
+    backend_override: str | None,
+    model_override: str | None,
+    verbose: bool,
+    start_time: float,
+) -> dict[str, Any]:
+    """Inner loop that runs all pipeline stages. Separated so KeyboardInterrupt is caught cleanly."""
+
     for i, stage_def in enumerate(pipeline.stages):
         stage_dir = task_dir / "stages" / f"{i:02d}-{stage_def.name}"
         stage_input_dir = stage_dir / "input"
@@ -102,10 +135,13 @@ def execute_pipeline(
         backend_url = backend_cfg["url"]
         backend_type = backend_cfg.get("type", "ollama")
 
-        # Resolve model name for this backend (e.g., Ollama → OpenRouter name)
-        stage_model = resolve_model_name(stage_def.model, backend_cfg)
-        if stage_model != stage_def.model:
-            _log(f"  Stage {i + 1}/{len(pipeline.stages)} '{stage_def.name}' ({stage_def.model} → {stage_model} on {backend_name})...", verbose)
+        # Resolve model: CLI override → manifest → skill file, then translate for backend
+        raw_model = model_override or stage_def.model
+        stage_model = resolve_model_name(raw_model, backend_cfg)
+        if model_override:
+            _log(f"  Stage {i + 1}/{len(pipeline.stages)} '{stage_def.name}' ({stage_def.model} → {stage_model} [override] on {backend_name})...", verbose)
+        elif stage_model != raw_model:
+            _log(f"  Stage {i + 1}/{len(pipeline.stages)} '{stage_def.name}' ({raw_model} → {stage_model} on {backend_name})...", verbose)
         else:
             _log(f"  Stage {i + 1}/{len(pipeline.stages)} '{stage_def.name}' ({stage_model} on {backend_name})...", verbose)
 
@@ -312,22 +348,43 @@ def _wire_stage_inputs(
 
 
 def _stage_completed(output_dir: Path) -> bool:
-    """Check if a stage has already completed (has output files beyond checkpoint)."""
+    """Check if a stage has cleanly completed.
+
+    Uses the completion marker in checkpoint.json (F116) as the authoritative
+    signal. Falls back to checking for output files if no checkpoint exists
+    (backwards compat with tasks run before this feature).
+    """
     if not output_dir.exists():
         return False
-    output_files = [f for f in output_dir.iterdir() if f.is_file() and f.name != "checkpoint.json"]
+
+    # Primary check: completion marker in checkpoint (F116)
+    checkpoint_path = output_dir / "checkpoint.json"
+    if checkpoint_path.exists():
+        try:
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            if "completed" in checkpoint:
+                return checkpoint["completed"] is True
+            # Legacy checkpoint without marker — fall through to output file check
+        except (json.JSONDecodeError, PermissionError):
+            pass
+
+    # Fallback: output files exist (legacy tasks without completion marker)
+    output_files = [
+        f for f in output_dir.iterdir()
+        if f.is_file() and f.name not in ("checkpoint.json", "heartbeat.json")
+    ]
     return len(output_files) > 0
 
 
-def _fail_task(db: HuginnDB, task_id: str, meta: dict, task_dir: Path, error: str) -> None:
-    """Mark a task as failed."""
-    meta["status"] = "failed"
+def _fail_task(db: HuginnDB, task_id: str, meta: dict, task_dir: Path, error: str, status: str = "failed") -> None:
+    """Mark a task as failed or interrupted."""
+    meta["status"] = status
     meta["error"] = error
     meta["completed_at"] = datetime.now(timezone.utc).isoformat()
     _save_meta(task_dir, meta)
     db.update_task(
         task_id,
-        status="failed",
+        status=status,
         error_message=error,
         completed_at=datetime.now(timezone.utc).isoformat(),
     )

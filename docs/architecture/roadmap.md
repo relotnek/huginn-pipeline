@@ -94,11 +94,44 @@ Key features:
 
 ---
 
-## Phase 5 — Dashboard
+## Phase 5 — The Unkindness (Distributed Ravens)
 
-**Goal:** Follow the ravens. See all active pipelines across backends.
+**Goal:** Multiple Huginn instances collaborate. Dispatch ravens to remote workers.
+
+An **unkindness** is a flock of ravens. This phase enables distributed pipeline execution — your laptop dispatches work to remote Huginn workers that have their own backends and tool runtimes.
+
+```bash
+# Dispatch to a remote worker
+huginn run threat-model-4q --input scope.md --worker heimdall
+
+# Deploy a pipeline to a worker
+huginn deploy threat-model-4q --worker heimdall
+
+# Monitor remote tasks
+huginn --worker heimdall status <task-id>
+huginn --worker heimdall output <task-id> --download
+```
+
+Key features:
+
+- Worker config in `config.yaml` alongside backends
+- API key authentication between operator and workers
+- Pipeline deployment (`huginn deploy`) to remote workers
+- Pipeline allowlisting and capability enforcement on workers
+- Cross-worker pipeline execution (different stages on different workers)
+- Worker health monitoring and failover
+- TLS enforcement for non-LAN workers
+- Audit logging for all remote dispatch
+
+See [The Unkindness: Distributed Ravens](unkindness.md) for the full architecture document.
+
+---
+
+## Phase 6 — Dashboard
+
+**Goal:** Follow the ravens. See all active pipelines across backends and workers.
 
 - Real-time progress streaming (SSE/WebSocket)
 - Web UI for pipeline monitoring
-- Backend utilization metrics
+- Backend and worker utilization metrics
 - Task history and analytics

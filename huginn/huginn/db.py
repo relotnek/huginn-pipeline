@@ -183,3 +183,32 @@ class HuginnDB:
             "SELECT * FROM runs WHERE stage_id = ? ORDER BY iteration", (stage_id,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # --- Cleanup ---
+
+    def delete_task(self, task_id: str) -> None:
+        """Delete a task and all its stages and runs from the database."""
+        stages = self.get_stages(task_id)
+        for s in stages:
+            self.conn.execute("DELETE FROM runs WHERE stage_id = ?", (s["id"],))
+        self.conn.execute("DELETE FROM stages WHERE task_id = ?", (task_id,))
+        self.conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        self.conn.commit()
+
+    def list_cleanable_tasks(
+        self, statuses: list[str], older_than_days: int | None = None
+    ) -> list[dict]:
+        """List tasks matching given statuses, optionally filtered by age."""
+        placeholders = ", ".join("?" for _ in statuses)
+        query = f"SELECT * FROM tasks WHERE status IN ({placeholders})"
+        params: list = list(statuses)
+
+        if older_than_days is not None:
+            from datetime import datetime, timedelta, timezone
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+            query += " AND queued_at < ?"
+            params.append(cutoff)
+
+        query += " ORDER BY queued_at ASC"
+        rows = self.conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]

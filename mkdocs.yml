@@ -47,6 +47,7 @@ nav:
     - Writing Skills: guides/writing-skills.md
     - Creating Pipelines: guides/creating-pipelines.md
     - Using Backends: guides/backends.md
+    - Setting Up a Local LLM Server: guides/local-server-setup.md
     - Background Execution: guides/background-execution.md
     - Checkpoint & Resume: guides/checkpoint-resume.md
   - Tutorials:
@@ -63,6 +64,7 @@ nav:
     - Overview: architecture/overview.md
     - Brain & Hands Separation: architecture/brain-hands.md
     - Agent Loop: architecture/agent-loop.md
+    - "The Unkindness: Distributed Ravens": architecture/unkindness.md
     - Roadmap: architecture/roadmap.md
 
 markdown_extensions:

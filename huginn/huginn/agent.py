@@ -16,6 +16,7 @@ from .ollama_client import CompletionResult, complete, get_client
 from .tools import ToolContext, execute_tool_call, get_tool_definitions
 
 MAX_TOOL_ROUNDS = 20
+HEARTBEAT_INTERVAL = 30  # seconds between heartbeat writes
 
 
 @dataclass
@@ -86,8 +87,15 @@ def run_agent(ctx: AgentContext) -> AgentResult:
 
     verification_passed = None
     last_output = ""
+    last_heartbeat = 0.0  # force immediate first heartbeat
 
     while ctx.iterations < ctx.max_iterations:
+        # Write heartbeat if interval has elapsed
+        now = time.time()
+        if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+            _write_heartbeat(ctx, start_time, "thinking")
+            last_heartbeat = now
+
         # Check timeout
         elapsed = time.time() - start_time
         if elapsed > ctx.timeout_minutes * 60:
@@ -161,7 +169,7 @@ def run_agent(ctx: AgentContext) -> AgentResult:
             verification_passed, failures = _verify_output(last_output, ctx.verification_rules)
 
             if verification_passed:
-                _save_checkpoint(ctx)
+                _save_checkpoint(ctx, completed=True)
                 break
             else:
                 # Feed failures back into next iteration
@@ -173,7 +181,7 @@ def run_agent(ctx: AgentContext) -> AgentResult:
         else:
             # No verification rules — one pass and done
             verification_passed = None
-            _save_checkpoint(ctx)
+            _save_checkpoint(ctx, completed=True)
             break
 
     elapsed = time.time() - start_time
@@ -238,10 +246,19 @@ def _run_tool_loop(
         {"role": "user", "content": user_message},
     ]
 
+    last_heartbeat = time.time()
+
     for _round in range(MAX_TOOL_ROUNDS):
         # Check timeout mid-loop
         if time.time() - start_time > ctx.timeout_minutes * 60:
             return "", f"Timed out after {ctx.timeout_minutes} minutes"
+
+        # Heartbeat before model call (longest wait)
+        now = time.time()
+        if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+            action = "tool-calling" if _round > 0 else "thinking"
+            _write_heartbeat(ctx, start_time, action)
+            last_heartbeat = now
 
         result = _complete_with_retries(
             client, ctx, user_message, tools=tool_defs, messages=conversation
@@ -258,8 +275,6 @@ def _run_tool_loop(
             assistant_msg["content"] = result.content
         if result.tool_calls:
             assistant_msg["tool_calls"] = result.tool_calls
-            if not result.content:
-                assistant_msg["content"] = None
         else:
             assistant_msg["content"] = result.content
         conversation.append(assistant_msg)
@@ -424,17 +439,35 @@ def _verify_output(output: str, rules: list[str]) -> tuple[bool, list[str]]:
     return passed, failures
 
 
-def _save_checkpoint(ctx: AgentContext) -> None:
-    """Save agent progress for resume."""
+def _save_checkpoint(ctx: AgentContext, completed: bool = False) -> None:
+    """Save agent progress for resume. Set completed=True on clean finish."""
     checkpoint = {
         "iterations": ctx.iterations,
         "total_tokens": ctx.total_tokens,
         "history": ctx.history,
         "saved_at": datetime.now(timezone.utc).isoformat(),
+        "completed": completed,
     }
     checkpoint_path = ctx.output_dir / "checkpoint.json"
     ctx.output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path.write_text(json.dumps(checkpoint, indent=2), encoding="utf-8")
+
+
+def _write_heartbeat(ctx: AgentContext, start_time: float, action: str = "thinking") -> None:
+    """Write a heartbeat file so external observers can tell if the agent is alive."""
+    heartbeat = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "iteration": ctx.iterations,
+        "total_tokens": ctx.total_tokens,
+        "elapsed_seconds": round(time.time() - start_time, 1),
+        "action": action,
+    }
+    heartbeat_path = ctx.output_dir / "heartbeat.json"
+    ctx.output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        heartbeat_path.write_text(json.dumps(heartbeat, indent=2), encoding="utf-8")
+    except OSError:
+        pass  # Non-fatal — don't crash the agent over a heartbeat write
 
 
 def _load_checkpoint(output_dir: Path) -> dict | None:

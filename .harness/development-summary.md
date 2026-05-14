@@ -2,7 +2,7 @@
 
 **Project**: Huginn — Skill-Based LLM Pipeline System
 **Date**: 2026-05-08
-**Status**: 73/120 features passing (61%)
+**Status**: 73/134 features passing (54%)
 
 ---
 
@@ -218,15 +218,32 @@ F115 huginn queue                        ← queue visibility
 - Webhooks (F087)
 - CLI: cancel, logs, batch (F088-F090)
 
-### Phase 5 — Dashboard
+### Phase 5 — The Unkindness (Distributed Ravens)
 
-**Goal**: Follow the ravens. See all active pipelines, backend utilization, task history.
+**Goal**: Multiple Huginn instances collaborate. Dispatch ravens to remote workers with their own backends and tool runtimes.
+
+See `docs/architecture/unkindness.md` for the full architecture document.
+
+**Key features:**
+- Worker config alongside backends (F121)
+- Worker daemon with auth (F123-F124)
+- `huginn run --worker <name>` dispatch (F125)
+- Remote status/output/logs proxying (F126)
+- Pipeline deployment to workers (F127)
+- Pipeline allowlisting + capability enforcement (F128-F129)
+- TLS, audit logging, cross-worker execution, failover (F130-F134)
+
+**Security model:** API key auth, pipeline allowlisting, capability declaration, TLS for non-LAN, audit logging, no worker-to-worker trust (operator is always the hub).
+
+### Phase 6 — Dashboard
+
+**Goal**: Follow the ravens across backends and workers.
 
 **Key features:**
 - Real-time progress streaming via SSE/WebSocket (F082)
-- Ravens overview — all active tasks across backends (F083)
+- Ravens overview — all active tasks across backends and workers (F083)
 - Web UI (F084)
-- Per-backend utilization metrics (F085)
+- Per-backend and per-worker utilization metrics (F085)
 
 ---
 
@@ -260,8 +277,9 @@ F115 huginn queue                        ← queue visibility
 | scheduling | 0/2 | 2 | 4 |
 | parallel | 0/3 | 3 | 4 |
 | resilience | 0/15 | 15 | 3.5 |
-| dashboard | 0/4 | 4 | 5 |
-| **TOTAL** | **54/120** | **120** | |
+| unkindness | 0/14 | 14 | 5 |
+| dashboard | 0/4 | 4 | 6 |
+| **TOTAL** | **73/134** | **134** | |
 
 ---
 
